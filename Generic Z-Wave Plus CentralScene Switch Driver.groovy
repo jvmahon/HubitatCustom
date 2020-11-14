@@ -1,124 +1,308 @@
 /*
-	Generic Z-Wave CentralScene Dimmer
-
-	Copyright 2016 -> 2020 Hubitat Inc.  All Rights Reserved
-	2020-11-12  2.2.4 jvm 
-		- Queries device for parameters 7-10 and uses the results to calculate local and remote delays
-		- Gather's command class versions at install / configure / update time to enable more advanced functions
-		- switched to using multilevel set v2 if a device supports it - for improved dimming rate control
-		- Removed code that sets remote ramping delay by changing device parameter during the level action 
-			- if device doesn't support multilevel v2, then always use the timing set by the device parameters 
-				- changing device ramping parameters while attempting to set level is unpredictable and caused errors!.
-		- Removed support for non-plus devices (they can use the default Hubitat drivers!). 
-		- Fixed Central Scenehold refresh. Use slowRefresh timing
-		- removed "Flash" feature as it isn't yet working in this revision. Plan to restore it soon!
-	2020--07-31 2.2.3 maxwell
-	    -switch to internal secure encap method
-	2020-06-01 2.2.1 bcopeland
-	    -basicSet to switchMultilevelSet conversion
-	2020-03-25 2.2.0 maxwell
-	    -C7/S2 updates
-	    -refactor
-	    -remove DZMX1 (move to generic dimmer)
-	    -add supervision report response
-	2019-11-14 2.1.7 maxwell
-	    -add safe nav on flashrate
-	    -add command class versions
-	    -move some leviton dimmers over from generic
-	2018-07-15 maxwell
-	    -add all button commands
-	2018-06-04 maxwell
-	    -updates to support changeLevel
-	2018-03-26 maxwell
-	    -add standard level events algorithm
-	2018-03-24 maxwell
-	    -initial pub
-
+*	Zen21 Central Scene Switch
+*	version: 1.1
+*	Originally from: https://github.com/dds82/hubitat/blob/master/Drivers/zooz/zen21-switch.groovy
 */
+
 import groovy.transform.Field
 
-@Field static Map commandClassVersions = [
-        0x20: 1     //basic v2 preferred as it specifies target value!
-        ,0x26: 3    //switchMultiLevel
-        ,0x5B: 3    //centralScene
-        ,0x70: 1    //configuration get
-	,0x86: 2	// Version get
-]
-@Field static Map switchVerbs = [0:"was turned",1:"is"]
-@Field static Map levelVerbs = [0:"was set to",1:"is"]
-@Field static Map switchValues = [0:"off",1:"on"]
-
 metadata {
-    definition (name: "Generic Z-Wave Plus CentralScene Dimmer",namespace: "hubitat", author: "Based on code from Mike Maxwell") {
-        capability "Actuator"
+    definition (name: "Testing Zwave Plus Central Scene Switch", namespace: "jvm", author:"jvm") {
         capability "Switch"
-        capability "Switch Level"
-        capability "ChangeLevel"
+        capability "Refresh"
+        capability "Actuator"
+        capability "Sensor"
         capability "Configuration"
-	    capability "Initialize"
         capability "PushableButton"
         capability "HoldableButton"
         capability "ReleasableButton"
-        capability "DoubleTapableButton"
-
-        command "flash"
-        command "refresh"
-        command "push", ["NUMBER"]
+        capability "DoubleTapableButton"	
+		capability "Initialize"		
+        // capability "Indicator"
+		
+		command "push", ["NUMBER"]
         command "hold", ["NUMBER"]
         command "release", ["NUMBER"]
         command "doubleTap", ["NUMBER"]
-										
-	command "setParameter",[[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],
-				[name:"size",type:"NUMBER", description:"Parameter Size", constraints:["NUMBER"]],
-				[name:"value",type:"NUMBER", description:"Parameter Value", constraints:["NUMBER"]]
-				]
-										
-		fingerprint inClusters: "0x26,0x2C,0x59,0x5A,0x5B,0x5E,0x70,0x85,0x86", outClusters: "0x5B", deviceJoinName: "Generic Zwave Plus CentralScene Dimmer"
-        fingerprint deviceId: "3034", inClusters: "0x5E,0x86,0x72,0x5A,0x85,0x59,0x73,0x26,0x27,0x70,0x2C,0x2B,0x5B,0x7A", outClusters: "0x5B", mfr: "0315", prod: "4447", deviceJoinName: "ZWP WD-100 Dimmer"
-        fingerprint deviceId: "3034", inClusters: "0x26,0x2B,0x2C,0x55,0x59,0x5A,0x5B,0x5E,0x6C,0x70,0x72,0x73,0x7A,0x85,0x86,0x9F", outClusters: "0x5B", mfr: "0315", prod: "4447", deviceJoinName: "ZLINK ZL-WD-100"
-		fingerprint deviceId: "3034", inClusters: "0x26,0x2B,0x2C,0x55,0x59,0x5A,0x5B,0x5E,0x6C,0x70,0x72,0x73,0x7A,0x85,0x86,0x9F", outClusters: "0x5B", mfr: "000C", prod: "4447", deviceJoinName: "Homeseer HS-WD100+"
+		
+
+        fingerprint mfr:"027A", prod:"B111", deviceId:"1E1C", inClusters:"0x5E,0x25,0x85,0x8E,0x59,0x55,0x86,0x72,0x5A,0x73,0x70,0x5B,0x6C,0x9F,0x7A", deviceJoinName: "Zooz Zen21 Switch" //US
+        fingerprint inClusters:"0x5E,0x25,0x85,0x8E,0x59,0x55,0x86,0x72,0x5A,0x73,0x70,0x5B,0x6C,0x9F,0x7A", deviceJoinName: "HomeSeer HS-WS100+" //US
+
+		
 
     }
-
     preferences {
-        input name: "param4", type: "enum", title: "Paddle function", options:[[0:"Normal"],[1:"Reverse"]], defaultValue: 0
-        input name: "flashRate", type: "enum", title: "Flash rate", options:[[1:"1s"],[2:"2s"],[5:"5s"]], defaultValue: 1
+        configParams.each { input it.value.input }
+        // input name: "associationsG2", type: "string", description: "To add nodes to associations use the Hexidecimal nodeID from the z-wave device list separated by commas into the space below", title: "Associations Group 2"
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
-        input name: "txtEnable", type: "bool", title: "Enable descriptionText logging", defaultValue: true
+        input name: "txtEnable", type: "bool", title: "Enable text logging", defaultValue: false
     }
 }
+@Field static Map configParams = [
+        1: [input: [name: "configParam1", type: "enum", title: "On/Off Paddle Orientation", description: "", defaultValue: 0, options: [0:"Normal",1:"Reverse",2:"Any paddle turns on/off"]], parameterSize: 1],
+        2: [input: [name: "configParam2", type: "enum", title: "LED Indicator Control", description: "", defaultValue: 0, options: [0:"Indicator is on when switch is off",1:"Indicator is on when switch is on",2:"Indicator is always off",3:"Indicator is always on"]], parameterSize: 1],
+        // 3: [input: [name: "configParam3", type: "enum", title: "Auto Turn-Off Timer", description: "", defaultValue: 0, options: [0:"Timer disabled",1:"Timer Enabled"]], parameterSize: 1],
+        // 4: [input: [name: "configParam4", type: "number", title: "Auto Off Timer", description: "Minutes 1-65535", defaultValue: 60, range:"1..65535"], parameterSize:4],
+        // 5: [input: [name: "configParam5", type: "enum", title: "Auto Turn-On Timer", description: "", defaultValue: 0, options: [0:"timer disabled",1:"timer enabled"]],parameterSize:1],
+        // 6: [input: [name: "configParam6", type: "number", title: "Auto On Timer", description: "Minutes 1-65535", defaultValue: 60, range:"1..65535"], parameterSize: 4],
+        // 7: [input: [name: "configParam7", type: "enum", title: "Association Reports", description: "", defaultValue: 15, options:[0:"none",1:"physical tap on ZEN26 only",2:"physical tap on 3-way switch only",3:"physical tap on ZEN26 or 3-way switch",4:"Z-Wave command from hub",5:"physical tap on ZEN26 or Z-Wave command",6:"physical tap on connected 3-way switch or Z-wave command",7:"physical tap on ZEN26 / 3-way switch / or Z-wave command",8:"timer only",9:"physical tap on ZEN26 or timer",10:"physical tap on 3-way switch or timer",11:"physical tap on ZEN26 / 3-way switch or timer",12:"Z-wave command from hub or timer",13:"physical tap on ZEN26, Z-wave command, or timer",14:"physical tap on ZEN26 / 3-way switch / Z-wave command, or timer", 15:"all of the above"]],parameterSize:1],
+        // 8: [input: [name: "configParam8", type: "enum", title: "On/Off Status After Power Failure", description: "", defaultValue: 2, options:[0:"Off",1:"On",2:"Last State"]],parameterSize:1],
+        // 9: [input: [name: "configParam9", type: "enum", title: "Enable/Disable Scene Control", defaultValue: 0, options:[0:"Scene control disabled",1:"scene control enabled"]],parameterSize:1],
+        // 11: [input: [name: "configParam11", type: "enum", title: "Smart Bulb Mode", defaultValue: 1, options:[0:"physical paddle control disabled",1:"physical paddle control enabled",2:"physical paddle and z-wave control disabled"]],parameterSize: 1],
+        // 12: [input: [name: "configParam12", type: "enum", title: "3-Way Switch Type", defaultValue: 0, options:[0:"Normal",1:"Momentary"]],parameterSize:1],
+        // 13: [input: [name: "configParam13", type: "enum", title: "Report Type Disabled Physical", defaultValue:0, options: [0:"switch reports on/off status and changes LED indicator state even if physical and Z-Wave control is disabled", 1:"switch doesn't report on/off status or change LED indicator state when physical (and Z-Wave) control is disabled"]], parameterSize:1],
+]
 
+// Following works for both Zooz and HomeSeer
+@Field static Map CMD_CLASS_VERS=[0x5B:3,0x86:3,0x72:2,0x8E:3,0x85:2,0x59:1,0x70:1]
 
-List<String> setParameter(parameterNumber = null, size = null, value = null){
-    if (parameterNumber == null || size == null || value == null) {
-		log.warn "incomplete parameter list supplied..."
-		log.info "syntax: setParameter(parameterNumber,size,value)"
-    } else {
-		return delayBetween([
-	    	secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: value, parameterNumber: parameterNumber, size: size)),
-	    	secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber))
-		],500)
-    }
-}
-
-//Z-Wave responses
-void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {
-	log.info "Firmware Version Report is: ${cmd}"
-	state.fwVersion = cmd
-}
-//cmds
+@Field static int numberOfAssocGroups=2
 
 void logsOff(){
     log.warn "debug logging disabled..."
     device.updateSetting("logEnable",[value:"false",type:"bool"])
 }
 
-void parse(String description){
-    if (logEnable) log.debug "parse description: ${description}"
-    hubitat.zwave.Command cmd = zwave.parse(description,commandClassVersions)
+void configure() {
+	state.clear()
+    if (!state.initialized) initializeVars()
+    runIn(5,pollDeviceData)
+}
+
+void initializeVars() {
+    // first run only
+    state.initialized=true
+    runIn(5, refresh)
+}
+
+List<String>  initialize()
+{
+    // first run only
+    state.initialized=true
+	def time = new Date().getTime()
+	
+	log.info "Initialize at time: ${time}" 
+    state.initializedTime = time
+    runIn(5, refresh)
+}
+
+
+void updated() {
+    log.info "updated..."
+    log.warn "debug logging is: ${logEnable == true}"
+    unschedule()
+    if (logEnable) runIn(1800,logsOff)
+    List<hubitat.zwave.Command> cmds=[]
+    cmds.addAll(processAssociations())
+    cmds.addAll(runConfigs())
+    sendToDevice(cmds)
+}
+
+List<hubitat.zwave.Command> runConfigs() {
+    List<hubitat.zwave.Command> cmds=[]
+    configParams.each { param, data ->
+        if (settings[data.input.name]) {
+            cmds.addAll(configCmd(param, data.parameterSize, settings[data.input.name]))
+        }
+    }
+    return cmds
+}
+
+List<hubitat.zwave.Command> pollConfigs() {
+    List<hubitat.zwave.Command> cmds=[]
+    configParams.each { param, data ->
+        if (settings[data.input.name]) {
+            cmds.add(zwave.configurationV1.configurationGet(parameterNumber: param.toInteger()))
+        }
+    }
+    return cmds
+}
+
+List<hubitat.zwave.Command> configCmd(parameterNumber, size, scaledConfigurationValue) {
+    List<hubitat.zwave.Command> cmds = []
+    cmds.add(zwave.configurationV1.configurationSet(parameterNumber: parameterNumber.toInteger(), size: size.toInteger(), scaledConfigurationValue: scaledConfigurationValue.toInteger()))
+    cmds.add(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber.toInteger()))
+    return cmds
+}
+
+// The following values are used by Zooz
+/*
+void indicatorNever() {
+    sendToDevice(configCmd(2,1,2))
+}
+
+void indicatorWhenOff() {
+    sendToDevice(configCmd(2,1,0))
+}
+
+void indicatorWhenOn() {
+    sendToDevice(configCmd(2,1,1))
+}
+*/
+
+// The following values are used by HomeSeer
+void indicatorNever() {
+    sendToDevice(configCmd(3,1,2))
+}
+
+void indicatorWhenOff() {
+    sendToDevice(configCmd(3,1,0))
+}
+
+void indicatorWhenOn() {
+    sendToDevice(configCmd(3,1,1))
+}
+
+
+void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) {
+    if(configParams[cmd.parameterNumber.toInteger()]) {
+        Map configParam=configParams[cmd.parameterNumber.toInteger()]
+        int scaledValue
+        cmd.configurationValue.reverse().eachWithIndex { v, index -> scaledValue=scaledValue | v << (8*index) }
+        device.updateSetting(configParam.input.name, [value: "${scaledValue}", type: configParam.input.type])
+    }
+}
+
+void pollDeviceData() {
+    List<hubitat.zwave.Command> cmds = []
+    cmds.add(zwave.versionV3.versionGet())
+    cmds.add(zwave.manufacturerSpecificV2.deviceSpecificGet(deviceIdType: 1))
+    cmds.addAll(processAssociations())
+    cmds.addAll(pollConfigs())
+    sendEvent(name: "numberOfButtons", value: 8)
+    sendToDevice(cmds)
+}
+
+void refresh() {
+    List<hubitat.zwave.Command> cmds=[]
+    // cmds.add(zwave.switchMultilevelV2.switchMultilevelGet())
+	if(txtEnable) "Refreshing with basicGet"
+    cmds.add(zwave.basicV1.basicGet())
+    sendToDevice(cmds)
+}
+
+void installed() {
+    if (logEnable) log.debug "installed()..."
+    initializeVars()
+}
+
+void eventProcess(Map evt) {
+    if (device.currentValue(evt.name).toString() != evt.value.toString() || !eventFilter) {
+        evt.isStateChange=true
+        sendEvent(evt)
+    }
+}
+
+void zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd) {
+    if (logEnable) log.debug cmd
+    switchEvents(cmd)
+}
+
+private void switchEvents(hubitat.zwave.Command cmd) {
+    String value = (cmd.value ? "on" : "off")
+    String description = "${device.displayName} was turned ${value}"
+    if (txtEnable) log.info description
+    eventProcess(name: "switch", value: value, descriptionText: description, type: state.isDigital?"digital":"physical")
+    state.isDigital=false
+}
+
+void zwaveEvent(hubitat.zwave.commands.switchbinaryv1.SwitchBinaryReport cmd) {
+    if (logEnable) log.debug cmd
+    switchEvents(cmd)
+}
+
+List<String>  on() {
+    state.isDigital=true
+	def cmds = [];
+    cmds.add(secure(zwave.basicV1.basicSet(value: 0xFF)))
+	cmds.add(secure(zwave.basicV1.basicGet()))	
+	return cmds
+}
+
+List<String>  off() {
+    state.isDigital=true
+	def cmds = []
+    cmds.add(secure(zwave.basicV1.basicSet(value: 0x00)))
+	cmds.add(secure(zwave.basicV1.basicGet()))	
+	return cmds
+}
+
+void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
+    hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
+    if (encapsulatedCommand) {
+        zwaveEvent(encapsulatedCommand)
+    }
+}
+
+void parse(String description) {
+    if (logEnable) log.debug "parse:${description}"
+    hubitat.zwave.Command cmd = zwave.parse(description, CMD_CLASS_VERS)
     if (cmd) {
         zwaveEvent(cmd)
     }
+}
+
+void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
+    if (logEnable) log.debug "Supervision get: ${cmd}"
+    hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
+    if (encapsulatedCommand) {
+        zwaveEvent(encapsulatedCommand)
+    }
+    sendToDevice(new hubitat.zwave.commands.supervisionv1.SupervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0))
+}
+
+void zwaveEvent(hubitat.zwave.commands.manufacturerspecificv2.DeviceSpecificReport cmd) {
+    if (logEnable) log.debug "Device Specific Report: ${cmd}"
+    switch (cmd.deviceIdType) {
+        case 1:
+            // serial number
+            def serialNumber=""
+            if (cmd.deviceIdDataFormat==1) {
+                cmd.deviceIdData.each { serialNumber += hubitat.helper.HexUtils.integerToHexString(it & 0xff,1).padLeft(2, '0')}
+            } else {
+                cmd.deviceIdData.each { serialNumber += (char) it }
+            }
+            device.updateDataValue("serialNumber", serialNumber)
+            break
+    }
+}
+
+void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
+    if (logEnable) log.debug "version3 report: ${cmd}"
+    device.updateDataValue("firmwareVersion", "${cmd.firmware0Version}.${cmd.firmware0SubVersion}")
+    device.updateDataValue("protocolVersion", "${cmd.zWaveProtocolVersion}.${cmd.zWaveProtocolSubVersion}")
+    device.updateDataValue("hardwareVersion", "${cmd.hardwareVersion}")
+}
+
+void sendToDevice(List<hubitat.zwave.Command> cmds) {
+    sendHubCommand(new hubitat.device.HubMultiAction(commands(cmds), hubitat.device.Protocol.ZWAVE))
+}
+
+void sendToDevice(hubitat.zwave.Command cmd) {
+    sendHubCommand(new hubitat.device.HubAction(secureCommand(cmd), hubitat.device.Protocol.ZWAVE))
+}
+
+void sendToDevice(String cmd) {
+    sendHubCommand(new hubitat.device.HubAction(secureCommand(cmd), hubitat.device.Protocol.ZWAVE))
+}
+
+List<String> commands(List<hubitat.zwave.Command> cmds, Long delay=200) {
+    return delayBetween(cmds.collect{ secureCommand(it) }, delay)
+}
+
+String secureCommand(hubitat.zwave.Command cmd) {
+    secureCommand(cmd.format())
+}
+
+String secureCommand(String cmd) {
+    String encap=""
+    if (getDataValue("zwaveSecurePairingComplete") != "true") {
+        return cmd
+    } else {
+        encap = "988100"
+    }
+    return "${encap}${cmd}"
 }
 
 String secure(String cmd){
@@ -129,197 +313,311 @@ String secure(hubitat.zwave.Command cmd){
     return zwaveSecureEncap(cmd)
 }
 
-void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd){
-    hubitat.zwave.Command encapCmd = cmd.encapsulatedCommand(commandClassVersions)
-    if (encapCmd) {
-        zwaveEvent(encapCmd)
+
+void zwaveEvent(hubitat.zwave.Command cmd) {
+    if (logEnable) log.debug "skip:${cmd}"
+}
+
+List<hubitat.zwave.Command> setDefaultAssociation() {
+    List<hubitat.zwave.Command> cmds=[]
+    cmds.add(zwave.associationV2.associationSet(groupingIdentifier: 1, nodeId: zwaveHubNodeId))
+    cmds.add(zwave.associationV2.associationGet(groupingIdentifier: 1))
+    return cmds
+}
+
+List<hubitat.zwave.Command> processAssociations(){
+    List<hubitat.zwave.Command> cmds = []
+    cmds.addAll(setDefaultAssociation())
+    for (int i = 2; i<=numberOfAssocGroups; i++) {
+        if (logEnable) log.debug "group: $i dataValue: " + getDataValue("zwaveAssociationG$i") + " parameterValue: " + settings."associationsG$i"
+        String parameterInput=settings."associationsG$i"
+        List<String> newNodeList = []
+        List<String> oldNodeList = []
+        if (getDataValue("zwaveAssociationG$i") != null) {
+            getDataValue("zwaveAssociationG$i").minus("[").minus("]").split(",").each {
+                if (it != "") {
+                    oldNodeList.add(it.minus(" "))
+                }
+            }
+        }
+        if (parameterInput != null) {
+            parameterInput.minus("[").minus("]").split(",").each {
+                if (it != "") {
+                    newNodeList.add(it.minus(" "))
+                }
+            }
+        }
+        if (oldNodeList.size > 0 || newNodeList.size > 0) {
+            if (logEnable) log.debug "${oldNodeList.size} - ${newNodeList.size}"
+            oldNodeList.each {
+                if (!newNodeList.contains(it)) {
+                    // user removed a node from the list
+                    if (logEnable) log.debug "removing node: $it, from group: $i"
+                    cmds.add(zwave.associationV2.associationRemove(groupingIdentifier: i, nodeId: Integer.parseInt(it, 16)))
+                }
+            }
+            newNodeList.each {
+                cmds.add(zwave.associationV2.associationSet(groupingIdentifier: i, nodeId: Integer.parseInt(it, 16)))
+            }
+        }
+        cmds.add(zwave.associationV2.associationGet(groupingIdentifier: i))
     }
-    sendHubCommand(new hubitat.device.HubAction(secure(zwave.supervisionV1.supervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0)), hubitat.device.Protocol.ZWAVE))
+    if (logEnable) log.debug "processAssociations cmds: ${cmds}"
+    return cmds
 }
 
-String startLevelChange(direction){
-    Integer upDown = direction == "down" ? 1 : 0
-    return secure(zwave.switchMultilevelV1.switchMultilevelStartLevelChange(upDown: upDown, ignoreStartLevel: 1, startLevel: 0))
+
+void zwaveEvent(hubitat.zwave.commands.associationv2.AssociationReport cmd) {
+    if (logEnable) log.debug "${device.label?device.label:device.name}: ${cmd}"
+    List<String> temp = []
+    if (cmd.nodeId != []) {
+        cmd.nodeId.each {
+            temp.add(it.toString().format( '%02x', it.toInteger() ).toUpperCase())
+        }
+    }
+    updateDataValue("zwaveAssociationG${cmd.groupingIdentifier}", "$temp")
 }
 
-List<String> stopLevelChange(){
-    return [
-            secure(zwave.switchMultilevelV1.switchMultilevelStopLevelChange())
-            ,"delay 200"
-            ,secure(zwave.basicV1.basicGet())
-    ]
+///////////////////////////////////////////////////////////////////////////////////////////////
+///////////////                  Central Scene Processing          ////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////
+
+void zwaveEvent(hubitat.zwave.commands.associationv2.AssociationGroupingsReport cmd) {
+    if (logEnable) log.debug "${device.label?device.label:device.name}: ${cmd}"
+    log.info "${device.label?device.label:device.name}: Supported association groups: ${cmd.supportedGroupings}"
+    state.associationGroups = cmd.supportedGroupings
 }
 
-void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) {
-	log.info "Received configurtion report ${cmd}"
-    
-	if (state.parameters == undefined) state.parameters = [:]
-    
-	state.parameters.put(cmd.parameterNumber, cmd.scaledConfigurationValue)
-
-	state.remoteRampTime = Math.round( (state.parameters.get('8') ?: 3)  * 1000 / (state.parameters.get('7') ?: 1))
-	state.localRampTime = Math.round((state.parameters.get('10') ?: 3) * 1000 / (state.parameters.get('9') ?: 1))
-}
-
-//returns on physical v1
-void zwaveEvent(hubitat.zwave.commands.switchmultilevelv1.SwitchMultilevelReport cmd){
-    if (logEnable) log.debug "SwitchMultilevelV1Report value: ${cmd}"
-    dimmerEvents(cmd.value,"physical")
-}
-
-//returns on physical v2
-void zwaveEvent(hubitat.zwave.commands.switchmultilevelv2.SwitchMultilevelReport cmd){
-    if (logEnable) log.debug "SwitchMultilevelV2Report value: ${cmd}"
-    dimmerEvents(cmd.value,"physical")
-}
-
-//returns on physical v3
-void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelReport cmd){
-    if (logEnable) log.debug "SwitchMultilevelV3Report value: ${cmd}"
-    dimmerEvents(cmd.value,"physical")
-}
-
-//returns on digital
-void zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd){
-        if (logEnable) log.info "BasicReport value: ${cmd}"
-log.info "BasicReport value: ${cmd}"
-    dimmerEvents(cmd.value,"digital")
-}
-
-//returns on digital v2
-void zwaveEvent(hubitat.zwave.commands.basicv2.BasicReport cmd){
-    if (logEnable) log.info "BasicReport V2  is: ${cmd}"
-	log.warn "BasicReport V2 value: ${cmd}"
-    dimmerEvents(cmd.targetValue,"digital")
-}
-
-void forceReleaseHold(button){
-	// This function operates as a backup in case a release report was lost on the network
-	// It will force a release to be sent if there has been a hold event and then
-	// a release has not occurred within the central scene hold button refresh period.
-	// The central scene hold button refresh period is 200 mSec for old devices (state.slowRefresh == false), else it is 55 seconds.
-	// Thus, adding in extra time for network delays, etc., this forces release after either 1 or 60 seconds 
-    if (state."${button}" == 1)
+// This next 2 functions operates as a backup in case a release report was lost on the network
+// It will force a release to be sent if there has been a hold event and then
+// a release has not occurred within the central scene hold button refresh period.
+// The central scene hold button refresh period is 200 mSec for old devices (state.slowRefresh == false), else it is 55 seconds.
+// Thus, adding in extra time for network delays, etc., this forces release after either 1 or 60 seconds 
+void forceReleaseHold01(){
+    if (state.Button_1_LastState == "held")
 	{
-		// only need to force a release hold if the button state is 1 when the timer expires
-		sendButtonEvent("released", button, "physical")
+		// only need to force a release hold if the button state is "held" when the timer expires
+		log.warn "Central Scene Release message not received before timeout - Faking a release message!"
+		sendEvent(name:"released", value:1 , type:"digital", isStateChange:true)
+		state.Button_1_LastState == "released"
 	}
-	state."${button}" = 0
+}
+void forceReleaseHold02(){
+    if (state.Button_2_LastState == "held")
+	{
+		// only need to force a release hold if the button state is "held" when the timer expires
+		log.warn "Central Scene Release message not received before timeout - Faking a release message!"
+		sendEvent(name:"released", value:2 , type:"digital", isStateChange:true)
+		state.Button_2_LastState == "released"
+	}
 }
 
-void zwaveEvent(hubitat.zwave.commands.centralscenev2.CentralSceneNotification cmd){
-    if (logEnable) log.debug "CentralSceneNotification: ${cmd}"
-
-    Integer button = cmd.sceneNumber
-    Integer key = cmd.keyAttributes
-    String action
-    switch (key){
-        case 0: //pushed
-            sendButtonEvent("pushed", button, "physical")
-			state."${button}" = 0
-            break
-        case 1:	//released, only after 2
-            state."${button}" = 0
-            sendButtonEvent("released", button, "physical")
-            break
-        case 2:	//holding
-		    // The first time you get a hold, send the hold event
-			// If the release has not occurred, assuming you are getting a refresh event and suppress sending another hold.
-			// Suppress using the "runIn" to set a timer which must be greater than the maximum slow refresh period of 55 seconds. Thus, use 60 seconds.
-            if (state."${button}" == 0){
-			    sendButtonEvent("held", button, "physical")
-                state."${button}" = 1
-				// Assume slow refresh rate of 55 seconds.
-                runIn( 60,forceReleaseHold,[data:button])		   
-				// Alternatively, could check for slowRefresh timing, but easier not to.	
-                // runIn( (state.slowRefresh ? 60 : 1 ),forceReleaseHold,[data:button])
-            }
-			else
-			{
-				if (logEnable) log.debug "Continuing hold of button ${button}"
-                		runIn( 60,forceReleaseHold,[data:button])				
-                		// runIn( (state.slowRefresh ? 60 : 1 ),forceReleaseHold,[data:button])
-			}
-            break
-        case 3:	//double tap, 4 is tripple tap
-			sendButtonEvent("doubleTapped", button, "physical")
-			state."${button}" = 0
-            break
-    }
+int tapCount(attribute)
+{
+	switch(attribute)
+	{
+		case 0:
+			return 1
+			break
+		case 1: // Released
+			return -1
+			break
+		case 2: // Held
+			return -2
+			break
+		default:  // For 3 or grater, subtract 1 from the attribute to get # of taps.
+			return (attribute - 1)
+			break
+	}
 }
 
-void zwaveEvent(hubitat.zwave.Command cmd){
-    if (logEnable) log.debug "skip: ${cmd}"
+void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneNotification cmd) {
+    Map evt = [type:"physical", isStateChange:true]
+	if(logEnable) log.debug "Received Central Scene Notification ${cmd}"
+	
+	def taps = tapCount(cmd.keyAttributes)
+	
+	if(logEnable) log.debug "Mapping of key attributes to Taps: ${taps}"
+	
+    if (cmd.sceneNumber==1) {
+
+		switch(taps)
+		{
+			case -1:		
+				evt.name = "released" 
+				evt.value = cmd.sceneNumber
+				evt.descriptionText="${device.displayName} button ${evt.value} released"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)
+				break
+
+			case -2:	
+				evt.name = "held" 
+				evt.value = cmd.sceneNumber
+
+				
+					if (state."Button_${cmd.sceneNumber}_LastState" != "held")
+					{
+						evt.descriptionText="${device.displayName} button ${evt.value} held"
+						if (txtEnable) log.info evt.descriptionText
+				
+						state."Button_${cmd.sceneNumber}_LastState" = evt.name
+						sendEvent(evt)
+						// Force a release hold if you don't get a refresh within the slow refresh period!
+						runIn( 60,forceReleaseHold01)		   
+					}
+					else
+					{
+						if (txtEnable) log.info "Still Holding button ${cmd.sceneNumber}"
+						runIn( 60,forceReleaseHold01)		   
+					}	
+				break
+				
+			case 1:
+				evt.name = "pushed"
+				evt.value= 1
+				evt.descriptionText="${device.displayName} button ${evt.value} pushed"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)
+				break				
+	 
+			case 2:
+				evt.name = "pushed" 
+				evt.value=3
+				evt.descriptionText="${device.displayName} button ${evt.value} pushed"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)
+				evt.name = "doubleTapped" 
+				evt.value=1
+				evt.descriptionText="${device.displayName} button ${cmd.sceneNumber} doubleTapped"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)			
+				break
+			
+			case 3:
+				evt.name = "pushed"
+				evt.value=5
+				evt.descriptionText="${device.displayName} button ${evt.value} pushed"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)
+				break
+			
+			case 4:
+				evt.name = "pushed"
+				evt.value=7
+				evt.descriptionText="${device.displayName} button ${evt.value} pushed"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)
+				break
+			
+			case 5:
+				evt.name = "pushed"
+				evt.value=9
+				evt.descriptionText="${device.displayName} button ${evt.value} pushed"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)
+				break
+		}
+    } else if (cmd.sceneNumber==2) {
+		switch(taps)
+		{
+			case -1:		
+				evt.name = "released" 
+				evt.value = cmd.sceneNumber
+				evt.descriptionText="${device.displayName} button ${evt.value} released"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)
+				break
+				
+			case -2:	
+				evt.name = "held" 
+				evt.value = cmd.sceneNumber
+				
+					if (state."Button_${cmd.sceneNumber}_LastState" != "held")
+					{
+						evt.descriptionText="${device.displayName} button ${evt.value} held"
+						if (txtEnable) log.info evt.descriptionText
+				
+						state."Button_${cmd.sceneNumber}_LastState" = evt.name
+						sendEvent(evt)
+						// Force a release hold if you don't get a refresh within the slow refresh period!
+						runIn( 60,forceReleaseHold02)		   
+					}
+					else
+					{
+						if (txtEnable) log.info "Still Holding button ${cmd.sceneNumber}"
+						runIn( 60,forceReleaseHold02)		   
+					}	
+				break	
+				
+			case 1:
+				evt.name = "pushed"
+				evt.value=2
+				evt.descriptionText="${device.displayName} button ${evt.value} pushed"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)
+				break
+	 
+			case 2:
+				evt.name = "pushed" 
+				evt.value=4
+				evt.descriptionText="${device.displayName} button ${evt.value} pushed"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)
+				evt.name = "doubleTapped" 
+				evt.value=1
+				evt.descriptionText="${device.displayName} button ${cmd.sceneNumber} doubleTapped"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)			
+				break
+			
+			case 3:
+				evt.name = "pushed"
+				evt.value=6
+				evt.descriptionText="${device.displayName} button ${evt.value} pushed"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)
+				break
+			
+			case 4:
+				evt.name = "pushed"
+				evt.value=8
+				evt.descriptionText="${device.displayName} button ${evt.value} pushed"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)
+				break
+			
+			case 5:
+				evt.name = "pushed"
+				evt.value=10
+				evt.descriptionText="${device.displayName} button ${evt.value} pushed"
+				if (txtEnable) log.info evt.descriptionText
+				state."Button_${cmd.sceneNumber}_LastState" = evt.name
+				sendEvent(evt)
+				break
+		}
+    } else {
+		log.warn "Central Scene number ${cmd.sceneNumber} received, but code only supports scenes 1 and 2"
+	}
 }
 
-void dimmerEvents(rawValue,type){
-    if (logEnable) log.debug "dimmerEvents value: ${rawValue}, type: ${type}"
-    Integer levelValue = rawValue.toInteger()
-    Integer crntLevel = (device.currentValue("level") ?: 50).toInteger()
-    Integer crntSwitch = (device.currentValue("switch") == "on") ? 1 : 0
-
-    String switchText
-    String levelText
-    String switchValue
-
-    switch(state.bin) {
-        case -1:
-            if (levelValue == 0){
-                switchValue = switchValues[0]
-                switchText = "${switchVerbs[crntSwitch ^ 1]} ${switchValue}"// --c1" //xor
-            } else {
-                switchValue = switchValues[1]
-                switchText = "${switchVerbs[crntSwitch & 1]} ${switchValue}"// --c3"
-                if (levelValue == crntLevel) levelText = "${levelVerbs[1]} ${crntLevel}%"// --c3a"
-                else levelText = "${levelVerbs[0]} ${levelValue}%"// --c3b"
-            }
-            break
-        case 0..100: //digital set level -basic report
-            switchValue = switchValues[levelValue ? 1 : 0]
-            switchText = "${switchVerbs[crntSwitch & 1]} ${switchValue}"// --c4"
-            if (levelValue == 0) levelValue = 1
-            levelText = "${levelVerbs[levelValue == crntLevel ? 1 : 0]} ${levelValue}%"// --c4"
-            break
-        case -11: //digital on -basic report
-            switchValue = switchValues[1]
-            switchText = "${switchVerbs[crntSwitch & 1]} ${switchValue}"// --c5"
-            break
-        case -10: //digital off -basic report
-            switchValue = switchValues[0]
-            switchText = "${switchVerbs[crntSwitch ^ 1]} ${switchValue}"// --c6"
-            break
-        case -2: //refresh digital -basic report
-            if (levelValue == 0){
-                switchValue = switchValues[0]
-                switchText = "${switchVerbs[1]} ${switchValue}"// --c10"
-                levelText = "${levelVerbs[1]} ${crntLevel}%"// --c10"
-                levelValue = crntLevel
-            } else {
-                switchValue = switchValues[1]
-                switchText = "${switchVerbs[1]} ${switchValue}"// --c11"
-                levelText = "${levelVerbs[1]} ${levelValue}%"// --c11"
-            }
-            break
-        default :
-            log.debug "missing- bin: ${state.bin}, levelValue:${levelValue}, crntLevel: ${crntLevel}, crntSwitch: ${crntSwitch}, type: ${type}"
-            break
-    }
-
-    if (switchText){
-        switchText = "${device.displayName} ${switchText} [${type}]"
-        if (txtEnable) log.info "${switchText}"
-        sendEvent(name: "switch", value: switchValue, descriptionText: switchText, type:type)
-    }
-    if (levelText){
-        levelText = "${device.displayName} ${levelText} [${type}]"
-        if (txtEnable) log.info "${levelText}"
-        sendEvent(name: "level", value: levelValue, descriptionText: levelText, type:type,unit:"%")
-    }
-    state.bin = -1
-}
-
-void delayHold(button){
-    sendButtonEvent("held", button, "physical")
+void sendButtonEvent(action, button, type){
+    String descriptionText = "${device.displayName} button ${button} was ${action} [${type}]"
+    if (txtEnable) log.info descriptionText
+    sendEvent(name:action, value:button, descriptionText:descriptionText, isStateChange:true, type:type)
 }
 
 void push(button){
@@ -336,280 +634,4 @@ void release(button){
 
 void doubleTap(button){
     sendButtonEvent("doubleTapped", button, "digital")
-}
-
-void sendButtonEvent(action, button, type){
-    String descriptionText = "${device.displayName} button ${button} was ${action} [${type}]"
-    if (txtEnable) log.info descriptionText
-    sendEvent(name:action, value:button, descriptionText:descriptionText, isStateChange:true, type:type)
-}
-
-List<String> setLevel(level){
-    return setLevel(level,1)
-}
-
-List<String> setLevel(level,ramp){
-    state.flashing = false
-    state.bin = level
-	// Values greater than 127 signify minutes and users may not realize they are setting huge delays --  simplify with use of 127 as the maximum.
-    if (ramp > 127) ramp = 127
-    if (ramp < 0) ramp = 0
-    if (level > 99) level = 99
-	if (level < 0) level = 0
-    
-	List<String> cmds = []
-    
-	if (state.commandVersions.get('38') > 1)
-	{
-        if (logEnable) log.debug "Sending value ${level} with delay ${ramp * 1000} mSec using switchMultilevel Version 2"
-		
-		
-		cmds.add(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: level, dimmingDuration: ramp)))
-		// Switches supporting version 2 will report using BasicReportv2 so you don't need
-		// to wait for switch to complete transition before you get the return report as v2 report has the target value and 
-		// you can use that target value to know what the new value will be when the transition completes.!
-		cmds.add(secure(zwave.basicV1.basicGet()))
-		
-		if(cmds) return cmds
-	}
-	else
-	{
-		if (logEnable) log.debug "Sending value ${level} with default ramp delay ${state.remoteRampTime} mSec using switchMultilevel Version 1"
-		
-		// Versions 2.2.3 and lower used to reset the ramp rate. This can be a problematic operation. Better to ignore and use the ramp rate set by the user in the configuration parameters.
-		// cmds.add(secure(zwave.configurationV1.configurationSet(scaledConfigurationValue:  ramp, parameterNumber: 8, size: 2)))
-		// cmds.add("delay 250")
-		cmds.add(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: level)))
-		cmds.add("delay ${(state.remoteRampTime ?: 3000) + 250}")
-		cmds.add(secure(zwave.basicV1.basicGet()))
-		
-		if(cmds) return cmds		
-		
-	}
-}
-
-
-List<String> on(){
-    state.bin = -11
-    state.flashing = false
-	
-	def cmds = [];
-	cmds.add(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: 0xFF)))
-	
-	if (state.commandVersions.get('32') > 1)
-	{
-		// Don't need a delay if Basic Report v2 is available since you know the new value based on the reported
-		// target value and you don't have to wait the entire ramp period!
-		cmds.add(secure(zwave.basicV2.basicGet()))	
-	}
-	else
-	{
-		// else if only the older basic report is available, have to wait the full time.
-		cmds.add("delay ${(state.remoteRampTime ?: 3000) + 250}")
-		cmds.add(secure(zwave.basicV1.basicGet()))	
-	}
-    return cmds
-}
-
-List<String> off(){
-    state.bin = -10
-    state.flashing = false
-	
-	def cmds = [];
-	cmds.add(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: 0x00)))
-	
-	if (state.commandVersions.get('32') > 1)
-	{
-		// Don't need a delay if Basic Report v2 is available since you know the new value based on the reported
-		// target value and you don't have to wait the entire ramp period!
-		cmds.add(secure(zwave.basicV2.basicGet()))	
-	}
-	else
-	{
-		// else if only the older basic report is available, have to wait the full time.
-		cmds.add("delay ${(state.remoteRampTime ?: 3000) + 250}")
-		cmds.add(secure(zwave.basicV1.basicGet()))	
-	}
-	return cmds
-}
-
-String flash(){
-    if (txtEnable) log.info "${device.displayName} was set to flash with a rate of ${flashRate ?: 1} seconds"
-
-	if (state.commandVersions.get('38') == 1)
-	{
-		log.warn "Your Zwave device may not properly display device flashing due to lack of support of updated protocol"
-	}
-    state.flashing = true
-    return flashOn()
-}
-
-String flashOn(){
-    if (!state.flashing) return
-    runIn((flashRate >= 1 ? flashRate: 1).toInteger(), flashOff) 
-    return secure(zwave.switchMultilevelV1.switchMultilevelSet(value: 99))
-}
-
-String flashOff(){
-    if (!state.flashing) return
-    runIn((flashRate >= 1 ? flashRate: 1).toInteger(), flashOn)
-    return secure(zwave.switchMultilevelV1.switchMultilevelSet(value: 0))
-}
-
-String refresh(){
-    if (logEnable) log.debug "refresh"
-    state.bin = -2
-    return secure(zwave.basicV1.basicGet())
-}
-
-void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport  cmd) {
-    if(logEnable) log.debug "Version Report Info ${cmd}"	
-	state.versionReport = cmd
-	}
-	
-void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneConfigurationReport  cmd) {
-    if(logEnable) log.debug "Central Scene V3 Configuration Report Info ${cmd}"	
-	state.slowRefresh = cmd.slowRefresh;
-	}
-	
-List<String>   getDeviceInfo(){
-	def cmds = [];
-    if(state.commandVersions == undefined) state.commandVersions = [:]
-	
-	List<Integer> ic = getDataValue("inClusters").split(",").collect{ hexStrToUnsignedInt(it) }
-    ic.each {
-		if (it) cmds.add(secure(zwave.versionV1.versionCommandClassGet(requestedCommandClass:it)))
-    }
-
-	// Software Version
-	cmds.add(secure(zwave.versionV1.versionGet()))
-	
-	// Set central Scene Slow Refresh
-	if (state.commandVersions.get('91') > 2)
-	{
-		if (logEnable) log.debug "Querying for Central Scene Configuration"
-		cmds.add(secure(zwave.centralSceneV3.centralSceneConfigurationGet() ))
-	}
-	
-	cmds.add(secure(zwave.manufacturerSpecificV1.manufacturerSpecificGet()))
-
-
-	
-	return cmds
-}
-
-
-
-// Command class report - Primary interest in this driver are the multiLevelVersion and CentralScene reports!
-// Maybe expand to also include central scene report!
-void zwaveEvent(hubitat.zwave.commands.versionv1.VersionCommandClassReport cmd) {
-    log.info "CommandClassReport- class:${ "0x${intToHexStr(cmd.requestedCommandClass)}" }, version:${cmd.commandClassVersion}"	
-
-    if (state.commandVersions == undefined) state.commandVersions = [:]
-    
-    state.commandVersions.put(cmd.requestedCommandClass, cmd.commandClassVersion)    
-	
-}
-
-void zwaveEvent(hubitat.zwave.commands.manufacturerspecificv1.ManufacturerSpecificReport cmd) {
-    log.info "Manufacturere Specific Report ${cmd}"	
-
-    state.manufacturereInfo = cmd
-    
-	
-}	
-	
-// Runs when driver is installed the first time!11111
-List<String>   installed(){
-
-    log.warn "installed Generic Z-Wave Plus CentralScene Dimmer ..."
-	state.clear()
-	
-    sendEvent(name: "level", value: 20)
-
-    List<String> cmds = []
-		
-	cmds = getDeviceInfo()
-	state.configured = true
-	
-    if (cmds) return cmds
-
-}
-
-List<String>  configure(){
-    log.warn "configuring Generic Z-Wave Plus CentralScene Dimmer ..."
-    runIn(1800,logsOff)
-	state.slowRefresh = false	
-	
-    sendEvent(name: "numberOfButtons", value: 2)
-	
-	// These state values are used to track whether you are in a Central Scene button holding state
-    state."${1}" = 0
-    state."${2}" = 0
-    runIn(5, "refresh")
-    
-    List<String> cmds = []
-	if(!state.configured)
-	{
-		cmds = getDeviceInfo()
-		state.configured = true
-	}
-    if (cmds) return cmds
-}
-
-//capture preference changes. Runs when Preferences "save" is clicked.
-List<String> updated(){
-    log.info "updated Generic Z-Wave Plus CentralScene Dimmer ..."
-    log.warn "debug logging is: ${logEnable == true}"
-    log.warn "description logging is: ${txtEnable == true}"
-	state.slowRefresh = false	
-
-    if (logEnable) runIn(1800,logsOff)
-
-    List<String> cmds = []
-	if(!state.configured)
-	{
-		cmds = getDeviceInfo()
-		state.configured = true
-	}	
-    //paddle reverse function
-    if (param4) {
-        cmds.add(secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: param4.toInteger(), parameterNumber: 4, size: 1)))
-    }
-
-    if (cmds) return cmds
-}
-
-List<String>  initialize()
-{
-	def date = new Date().getTime()
-	//state.initializedTime = date
-	
-	def cmds = []
-    
-	if(!state.configured)
-	{
-		cmds = getDeviceInfo()
-		state.configured = true
-	}	
-		// Toggle Switch Orientation
-	cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: 4)))
-	
-	// Remote Ramp Rate Steps
-	cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: 7)))
-	
-	// Remote Ramp Rate Speed
-	cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: 8)))
-	
-	// local Ramp Rate Steps
-	cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: 9)))
-	
-	// local Ramp Rate Speed
-	cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: 10)))   
-	
-	// get current value!
-
-	cmds.add(secure(zwave.basicV1.basicGet()))	
-	
-	return cmds
 }
