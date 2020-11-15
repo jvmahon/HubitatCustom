@@ -5,6 +5,7 @@
 */
 
 import groovy.transform.Field
+@Field def driverVersion = 0.1
 
 metadata {
     definition (name: "Testing Zwave Plus Central Scene Switch", namespace: "jvm", author:"jvm") {
@@ -164,20 +165,12 @@ void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
     }
 }
 
-
-
-
-
 void eventProcess(Map evt) {
     if (device.currentValue(evt.name).toString() != evt.value.toString() || !eventFilter) {
         evt.isStateChange=true
         sendEvent(evt)
     }
 }
-
-
-
-
 
 void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
     if (logEnable) log.debug "Supervision get: ${cmd}"
@@ -264,7 +257,6 @@ void pollDeviceData() {
     cmds.add(zwave.manufacturerSpecificV2.deviceSpecificGet(deviceIdType: 1))
     cmds.addAll(processAssociations())
     cmds.addAll(pollConfigs())
-    sendEvent(name: "numberOfButtons", value: 10)
     sendToDevice(cmds)
 }
 
@@ -294,26 +286,39 @@ void installed() {
 	state.clear()
 	getZwaveClassVersions()
 	pollDeviceData()
+	runIn(10,getCentralSceneInfo)
 	state.installCompleted = true
 }
+
+
 void configure() {
+	if (logEnable) log.debug "Current device data state: ${device}"
+	if (logEnable) log.debug "Current state data state: ${state}"
+	
 	if(state.installCompleted != true )
 	{
 		installed()
 	}
-	if( state.configured != true )
-	{
-		getZwaveClassVersions()		
-	}
-
+	getZwaveClassVersions()
+	runIn(10,getCentralSceneInfo)
 	state.configured = true
-
-    runIn(5,pollDeviceData)
 }
 
 void  initialize()
 {
-    // first run only
+	getZwaveClassVersions()
+	
+    log.info "Driver Version is ${driverVersion}"
+	if (state?.driverVersion != driverVersion)
+	{
+		log.info "Driver version has changed - redoing configuration and install"
+		configure()
+		
+	}
+	
+	state.driverVersion = driverVersion
+	
+	// first run only
     state.initialized = true
 	if ( state.configured != true )
 	{
@@ -484,15 +489,18 @@ void   getZwaveClassVersions(){
 	
 	List<Integer> ic = getDataValue("inClusters").split(",").collect{ hexStrToUnsignedInt(it) }
     ic.each {
-		if (it) cmds.add(zwave.versionV3.versionCommandClassGet(requestedCommandClass:it))
-    }
-
-	// Software Version
-	cmds.add(zwave.versionV1.versionGet())
-
-	cmds.add(zwave.manufacturerSpecificV1.manufacturerSpecificGet())
 	
-    sendToDevice(cmds)
+		if (it) 
+		{
+			if (!state.commandVersions.get(it as String))
+			{
+			log.info "Requesting Command class version for class ${it}"
+
+			cmds.add(zwave.versionV3.versionCommandClassGet(requestedCommandClass:it.toInteger()))
+			}
+		}
+    }
+    if(cmds) sendToDevice(cmds)
 }
 
 
@@ -508,8 +516,69 @@ void zwaveEvent(hubitat.zwave.commands.versionv1.VersionCommandClassReport cmd) 
 ///////////////                  Central Scene Processing          ////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
+void getCentralSceneInfo()
+{
+    List<hubitat.zwave.Command> cmds = []
+	
+	switch(state.commandVersions.get('91'))
+	{
+	case 1:
+		cmds.add( zwave.centralSceneV1.centralSceneSupportedGet() )
+		break 
+	case 2:
+		cmds.add( zwave.centralSceneV2.centralSceneSupportedGet() )
+		break 
+	case 3:
+		cmds.add( zwave.centralSceneV3.centralSceneSupportedGet() )
+		break
+	}
+	
+	sendToDevice(cmds)
 
+}
+void setButtonCount( cmd )
+{
+	if ( cmd.identical != true) log.warn "Central Scene Code not configured to handle non-identical scene buttons"
+	
+	int buttons
+	if (cmd.supportedKeyAttributes[0].keyPress5x == true)
+	{
+		buttons = ( cmd.supportedScenes * 5)
+	}
+	else if (cmd.supportedKeyAttributes[0].keyPress4x == true)
+	{
+		buttons = ( cmd.supportedScenes * 4)
+	}
+	else if (cmd.supportedKeyAttributes[0].keyPress3x == true)
+	{
+		buttons = ( cmd.supportedScenes * 3)
+	}
+	else if (cmd.supportedKeyAttributes[0].keyPress2x == true)
+	{
+		buttons = ( cmd.supportedScenes * 2)
+	}
+	else  if (cmd.supportedKeyAttributes[0].keyPress1x == true)
+	{
+		buttons = ( cmd.supportedScenes * 1)
+	}
+    sendEvent(name: "numberOfButtons", value: buttons)
+}
 
+void zwaveEvent(hubitat.zwave.commands.centralscenev2.CentralSceneSupportedReport  cmd) {
+    log.debug "Central Scene V2 Supported Report Info ${cmd}"	
+	state.centralScene = cmd
+	setButtonCount(cmd)
+
+}
+	
+void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneSupportedReport  cmd) {
+    log.debug "Central Scene V3 Supported Report Info ${cmd}"	
+	state.centralScene = cmd
+	setButtonCount(cmd)
+	}
+	
+
+	
 // This next 2 functions operates as a backup in case a release report was lost on the network
 // It will force a release to be sent if there has been a hold event and then
 // a release has not occurred within the central scene hold button refresh period.
