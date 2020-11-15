@@ -41,7 +41,7 @@ metadata {
 }
 @Field static Map configParams = [
         1: [input: [name: "configParam1", type: "enum", title: "On/Off Paddle Orientation", description: "", defaultValue: 0, options: [0:"Normal",1:"Reverse",2:"Any paddle turns on/off"]], parameterSize: 1],
-        2: [input: [name: "configParam2", type: "enum", title: "LED Indicator Control", description: "", defaultValue: 0, options: [0:"Indicator is on when switch is off",1:"Indicator is on when switch is on",2:"Indicator is always off",3:"Indicator is always on"]], parameterSize: 1],
+        // 2: [input: [name: "configParam2", type: "enum", title: "LED Indicator Control", description: "", defaultValue: 0, options: [0:"Indicator is on when switch is off",1:"Indicator is on when switch is on",2:"Indicator is always off",3:"Indicator is always on"]], parameterSize: 1],
         // 3: [input: [name: "configParam3", type: "enum", title: "Auto Turn-Off Timer", description: "", defaultValue: 0, options: [0:"Timer disabled",1:"Timer Enabled"]], parameterSize: 1],
         // 4: [input: [name: "configParam4", type: "number", title: "Auto Off Timer", description: "Minutes 1-65535", defaultValue: 60, range:"1..65535"], parameterSize:4],
         // 5: [input: [name: "configParam5", type: "enum", title: "Auto Turn-On Timer", description: "", defaultValue: 0, options: [0:"timer disabled",1:"timer enabled"]],parameterSize:1],
@@ -57,176 +57,16 @@ metadata {
 // Following works for both Zooz and HomeSeer
 @Field static Map CMD_CLASS_VERS=[0x5B:3,0x86:3,0x72:2,0x8E:3,0x85:2,0x59:1,0x70:1]
 
-@Field static int numberOfAssocGroups=2
+// Next line is device specific - Devices always have a first group.
+// Some may have a second or more.
+@Field static int numberOfAssocGroups=1
 
-void logsOff(){
-    log.warn "debug logging disabled..."
-    device.updateSetting("logEnable",[value:"false",type:"bool"])
-}
+// @Field static int numberOfAssocGroups=2
 
-void configure() {
-	state.clear()
-    if (!state.initialized) initializeVars()
-    runIn(5,pollDeviceData)
-}
-
-void initializeVars() {
-    // first run only
-    state.initialized=true
-    runIn(5, refresh)
-}
-
-List<String>  initialize()
-{
-    // first run only
-    state.initialized=true
-	def time = new Date().getTime()
-	
-	log.info "Initialize at time: ${time}" 
-    state.initializedTime = time
-    runIn(5, refresh)
-}
-
-
-void updated() {
-    log.info "updated..."
-    log.warn "debug logging is: ${logEnable == true}"
-    unschedule()
-    if (logEnable) runIn(1800,logsOff)
-    List<hubitat.zwave.Command> cmds=[]
-    cmds.addAll(processAssociations())
-    cmds.addAll(runConfigs())
-    sendToDevice(cmds)
-}
-
-List<hubitat.zwave.Command> runConfigs() {
-    List<hubitat.zwave.Command> cmds=[]
-    configParams.each { param, data ->
-        if (settings[data.input.name]) {
-            cmds.addAll(configCmd(param, data.parameterSize, settings[data.input.name]))
-        }
-    }
-    return cmds
-}
-
-List<hubitat.zwave.Command> pollConfigs() {
-    List<hubitat.zwave.Command> cmds=[]
-    configParams.each { param, data ->
-        if (settings[data.input.name]) {
-            cmds.add(zwave.configurationV1.configurationGet(parameterNumber: param.toInteger()))
-        }
-    }
-    return cmds
-}
-
-List<hubitat.zwave.Command> configCmd(parameterNumber, size, scaledConfigurationValue) {
-    List<hubitat.zwave.Command> cmds = []
-    cmds.add(zwave.configurationV1.configurationSet(parameterNumber: parameterNumber.toInteger(), size: size.toInteger(), scaledConfigurationValue: scaledConfigurationValue.toInteger()))
-    cmds.add(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber.toInteger()))
-    return cmds
-}
-
-// The following values are used by Zooz
-/*
-void indicatorNever() {
-    sendToDevice(configCmd(2,1,2))
-}
-
-void indicatorWhenOff() {
-    sendToDevice(configCmd(2,1,0))
-}
-
-void indicatorWhenOn() {
-    sendToDevice(configCmd(2,1,1))
-}
-*/
-
-// The following values are used by HomeSeer
-void indicatorNever() {
-    sendToDevice(configCmd(3,1,2))
-}
-
-void indicatorWhenOff() {
-    sendToDevice(configCmd(3,1,0))
-}
-
-void indicatorWhenOn() {
-    sendToDevice(configCmd(3,1,1))
-}
-
-
-void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) {
-    if(configParams[cmd.parameterNumber.toInteger()]) {
-        Map configParam=configParams[cmd.parameterNumber.toInteger()]
-        int scaledValue
-        cmd.configurationValue.reverse().eachWithIndex { v, index -> scaledValue=scaledValue | v << (8*index) }
-        device.updateSetting(configParam.input.name, [value: "${scaledValue}", type: configParam.input.type])
-    }
-}
-
-void pollDeviceData() {
-    List<hubitat.zwave.Command> cmds = []
-    cmds.add(zwave.versionV3.versionGet())
-    cmds.add(zwave.manufacturerSpecificV2.deviceSpecificGet(deviceIdType: 1))
-    cmds.addAll(processAssociations())
-    cmds.addAll(pollConfigs())
-    sendEvent(name: "numberOfButtons", value: 8)
-    sendToDevice(cmds)
-}
-
-void refresh() {
-    List<hubitat.zwave.Command> cmds=[]
-    // cmds.add(zwave.switchMultilevelV2.switchMultilevelGet())
-	if(txtEnable) "Refreshing with basicGet"
-    cmds.add(zwave.basicV1.basicGet())
-    sendToDevice(cmds)
-}
-
-void installed() {
-    if (logEnable) log.debug "installed()..."
-    initializeVars()
-}
-
-void eventProcess(Map evt) {
-    if (device.currentValue(evt.name).toString() != evt.value.toString() || !eventFilter) {
-        evt.isStateChange=true
-        sendEvent(evt)
-    }
-}
-
-void zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd) {
-    if (logEnable) log.debug cmd
-    switchEvents(cmd)
-}
-
-private void switchEvents(hubitat.zwave.Command cmd) {
-    String value = (cmd.value ? "on" : "off")
-    String description = "${device.displayName} was turned ${value}"
-    if (txtEnable) log.info description
-    eventProcess(name: "switch", value: value, descriptionText: description, type: state.isDigital?"digital":"physical")
-    state.isDigital=false
-}
-
-void zwaveEvent(hubitat.zwave.commands.switchbinaryv1.SwitchBinaryReport cmd) {
-    if (logEnable) log.debug cmd
-    switchEvents(cmd)
-}
-
-List<String>  on() {
-    state.isDigital=true
-	def cmds = [];
-    cmds.add(secure(zwave.basicV1.basicSet(value: 0xFF)))
-	cmds.add(secure(zwave.basicV1.basicGet()))	
-	return cmds
-}
-
-List<String>  off() {
-    state.isDigital=true
-	def cmds = []
-    cmds.add(secure(zwave.basicV1.basicSet(value: 0x00)))
-	cmds.add(secure(zwave.basicV1.basicGet()))	
-	return cmds
-}
+//////////////////////////////////////////////////////////////////////
+//////                  Z-Wave Helper Functions                ///////
+//////   Format messages, Send to Device, secure Messages      ///////
+////////////////////////////////////////////////////////////////////// 
 
 void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
     hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
@@ -241,38 +81,6 @@ void parse(String description) {
     if (cmd) {
         zwaveEvent(cmd)
     }
-}
-
-void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
-    if (logEnable) log.debug "Supervision get: ${cmd}"
-    hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
-    if (encapsulatedCommand) {
-        zwaveEvent(encapsulatedCommand)
-    }
-    sendToDevice(new hubitat.zwave.commands.supervisionv1.SupervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0))
-}
-
-void zwaveEvent(hubitat.zwave.commands.manufacturerspecificv2.DeviceSpecificReport cmd) {
-    if (logEnable) log.debug "Device Specific Report: ${cmd}"
-    switch (cmd.deviceIdType) {
-        case 1:
-            // serial number
-            def serialNumber=""
-            if (cmd.deviceIdDataFormat==1) {
-                cmd.deviceIdData.each { serialNumber += hubitat.helper.HexUtils.integerToHexString(it & 0xff,1).padLeft(2, '0')}
-            } else {
-                cmd.deviceIdData.each { serialNumber += (char) it }
-            }
-            device.updateDataValue("serialNumber", serialNumber)
-            break
-    }
-}
-
-void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
-    if (logEnable) log.debug "version3 report: ${cmd}"
-    device.updateDataValue("firmwareVersion", "${cmd.firmware0Version}.${cmd.firmware0SubVersion}")
-    device.updateDataValue("protocolVersion", "${cmd.zWaveProtocolVersion}.${cmd.zWaveProtocolSubVersion}")
-    device.updateDataValue("hardwareVersion", "${cmd.hardwareVersion}")
 }
 
 void sendToDevice(List<hubitat.zwave.Command> cmds) {
@@ -317,6 +125,269 @@ String secure(hubitat.zwave.Command cmd){
 void zwaveEvent(hubitat.zwave.Command cmd) {
     if (logEnable) log.debug "skip:${cmd}"
 }
+//////////////////////////////////////////////////////////////////////
+
+void logsOff(){
+    log.warn "debug logging disabled..."
+    device.updateSetting("logEnable",[value:"false",type:"bool"])
+}
+
+
+
+List<hubitat.zwave.Command> runConfigs() {
+    List<hubitat.zwave.Command> cmds=[]
+    configParams.each { param, data ->
+        if (settings[data.input.name]) {
+            cmds.addAll(configCmd(param, data.parameterSize, settings[data.input.name]))
+        }
+    }
+    return cmds
+}
+
+
+List<hubitat.zwave.Command> configCmd(parameterNumber, size, scaledConfigurationValue) {
+    List<hubitat.zwave.Command> cmds = []
+    cmds.add(zwave.configurationV1.configurationSet(parameterNumber: parameterNumber.toInteger(), size: size.toInteger(), scaledConfigurationValue: scaledConfigurationValue.toInteger()))
+    cmds.add(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber.toInteger()))
+    return cmds
+}
+
+
+
+
+void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) {
+    if(configParams[cmd.parameterNumber.toInteger()]) {
+        Map configParam=configParams[cmd.parameterNumber.toInteger()]
+        int scaledValue
+        cmd.configurationValue.reverse().eachWithIndex { v, index -> scaledValue=scaledValue | v << (8*index) }
+        device.updateSetting(configParam.input.name, [value: "${scaledValue}", type: configParam.input.type])
+    }
+}
+
+
+
+
+
+void eventProcess(Map evt) {
+    if (device.currentValue(evt.name).toString() != evt.value.toString() || !eventFilter) {
+        evt.isStateChange=true
+        sendEvent(evt)
+    }
+}
+
+
+
+
+
+void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
+    if (logEnable) log.debug "Supervision get: ${cmd}"
+    hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
+    if (encapsulatedCommand) {
+        zwaveEvent(encapsulatedCommand)
+    }
+    sendToDevice(new hubitat.zwave.commands.supervisionv1.SupervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0))
+}
+
+//////////////////////////////////////////////////////////////////////
+//////         Setup functions for Indicator Capability        ///////
+////////////////////////////////////////////////////////////////////// 
+// The following values are used by Zooz
+
+
+/*
+void indicatorNever() {
+    sendToDevice(configCmd(2,1,2))
+}
+
+void indicatorWhenOff() {
+    sendToDevice(configCmd(2,1,0))
+}
+
+void indicatorWhenOn() {
+    sendToDevice(configCmd(2,1,1))
+}
+*/
+
+// The following values are used by HomeSeer WS100
+void indicatorNever() {
+    sendToDevice(configCmd(3,1,2))
+}
+
+void indicatorWhenOff() {
+    sendToDevice(configCmd(3,1,0))
+}
+
+void indicatorWhenOn() {
+    sendToDevice(configCmd(3,1,1))
+}
+
+//////////////////////////////////////////////////////////////
+//////              Learn About the Device             ///////
+////////////////////////////////////////////////////////////// 
+
+void zwaveEvent(hubitat.zwave.commands.manufacturerspecificv2.DeviceSpecificReport cmd) {
+    if (logEnable) log.debug "Device Specific Report: ${cmd}"
+    switch (cmd.deviceIdType) {
+        case 1:
+            // serial number
+            def serialNumber=""
+            if (cmd.deviceIdDataFormat==1) {
+                cmd.deviceIdData.each { serialNumber += hubitat.helper.HexUtils.integerToHexString(it & 0xff,1).padLeft(2, '0')}
+            } else {
+                cmd.deviceIdData.each { serialNumber += (char) it }
+            }
+            device.updateDataValue("serialNumber", serialNumber)
+            break
+    }
+}
+
+void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
+    if (logEnable) log.debug "version3 report: ${cmd}"
+    device.updateDataValue("firmwareVersion", "${cmd.firmware0Version}.${cmd.firmware0SubVersion}")
+    device.updateDataValue("protocolVersion", "${cmd.zWaveProtocolVersion}.${cmd.zWaveProtocolSubVersion}")
+    device.updateDataValue("hardwareVersion", "${cmd.hardwareVersion}")
+}
+
+List<hubitat.zwave.Command> pollConfigs() {
+    List<hubitat.zwave.Command> cmds=[]
+    configParams.each { param, data ->
+        if (settings[data.input.name]) {
+            cmds.add(zwave.configurationV1.configurationGet(parameterNumber: param.toInteger()))
+        }
+    }
+    return cmds
+}
+
+void pollDeviceData() {
+    List<hubitat.zwave.Command> cmds = []
+    cmds.add(zwave.versionV3.versionGet())
+    cmds.add(zwave.manufacturerSpecificV2.deviceSpecificGet(deviceIdType: 1))
+    cmds.addAll(processAssociations())
+    cmds.addAll(pollConfigs())
+    sendEvent(name: "numberOfButtons", value: 10)
+    sendToDevice(cmds)
+}
+
+
+//////////////////////////////////////////////////////////////////////
+//////        Handle Startup and Configuration Tasks           ///////
+//////   Refresh, Initialize, Configuration Capabilities       ///////
+////////////////////////////////////////////////////////////////////// 
+
+void refresh() {
+	if(txtEnable) "Refreshing device status .."
+    List<hubitat.zwave.Command> cmds=[]
+	
+	if( state?.commandVersions?.get('38') > 1 )
+	{
+		cmds.add(zwave.switchMultilevelV2.switchMultilevelGet())
+	}
+	else
+	{
+		cmds.add(zwave.basicV1.basicGet())
+	}
+    sendToDevice(cmds)
+}
+
+void installed() {
+    if (logEnable) log.debug "installed ${device.label?device.label:device.name} ..."
+	state.clear()
+	getZwaveClassVersions()
+	pollDeviceData()
+	state.installCompleted = true
+}
+void configure() {
+	if(state.installCompleted != true )
+	{
+		installed()
+	}
+	if( state.configured != true )
+	{
+		getZwaveClassVersions()		
+	}
+
+	state.configured = true
+
+    runIn(5,pollDeviceData)
+}
+
+void  initialize()
+{
+    // first run only
+    state.initialized = true
+	if ( state.configured != true )
+	{
+	configure()
+	}
+	
+	def time = new Date().getTime()
+	
+	log.info "Initialize ${device.label?device.label:device.name} at time: ${time}" 
+    state.initializedTime = time
+    runIn(5, refresh)
+}
+
+
+void updated() {
+    log.info "updated ${device.label?device.label:device.name} ..."
+    log.warn "debug logging is: ${logEnable == true}"
+    unschedule()
+    if (logEnable) runIn(1800,logsOff)
+    List<hubitat.zwave.Command> cmds=[]
+    cmds.addAll(processAssociations())
+    cmds.addAll(runConfigs())
+    sendToDevice(cmds)
+}
+
+//////////////////////////////////////////////////////////////////////
+//////        Handle Basic Reports and Device Functions        ///////
+////////////////////////////////////////////////////////////////////// 
+
+void zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd) {
+    if (logEnable) log.debug cmd
+    switchEvents(cmd)
+}
+
+private void switchEvents(hubitat.zwave.Command cmd) {
+    String value = (cmd.value ? "on" : "off")
+    String description = "${device.displayName} was turned ${value}"
+    if (txtEnable) log.info description
+    eventProcess(name: "switch", value: value, descriptionText: description, type: state.isDigital ? "digital" : "physical")
+    state.isDigital=false
+}
+
+void zwaveEvent(hubitat.zwave.commands.switchbinaryv1.SwitchBinaryReport cmd) {
+    if (logEnable) log.debug cmd
+    switchEvents(cmd)
+}
+
+
+void on() {
+    state.isDigital=true
+	List<hubitat.zwave.Command> cmds = []
+    cmds.add(secure(zwave.basicV1.basicSet(value: 0xFF)))
+	cmds.add(secure(zwave.basicV1.basicGet()))	
+	sendToDevice(cmds)
+}
+
+void off() {
+    state.isDigital=true
+	List<hubitat.zwave.Command> cmds = []
+    cmds.add(secure(zwave.basicV1.basicSet(value: 0x00)))
+	cmds.add(secure(zwave.basicV1.basicGet()))	
+	sendToDevice(cmds)
+}
+
+//////////////////////////////////////////////////////////////////////
+////////////        Handle Z-Wave Associations        ////////////////
+////////////////////////////////////////////////////////////////////// 
+
+void zwaveEvent(hubitat.zwave.commands.associationv2.AssociationGroupingsReport cmd) {
+    if (logEnable) log.debug "${device.label?device.label:device.name}: ${cmd}"
+    log.info "${device.label?device.label:device.name}: Supported association groups: ${cmd.supportedGroupings}"
+    state.associationGroups = cmd.supportedGroupings
+}
+
 
 List<hubitat.zwave.Command> setDefaultAssociation() {
     List<hubitat.zwave.Command> cmds=[]
@@ -378,15 +449,66 @@ void zwaveEvent(hubitat.zwave.commands.associationv2.AssociationReport cmd) {
     updateDataValue("zwaveAssociationG${cmd.groupingIdentifier}", "$temp")
 }
 
+
+////////////////  Send Button Events Resulting from Capabilities Processing /////////////
+
+void sendButtonEvent(action, button, type){
+    String descriptionText = "${device.displayName} button ${button} was ${action} [${type}]"
+    if (txtEnable) log.info descriptionText
+    sendEvent(name:action, value:button, descriptionText:descriptionText, isStateChange:true, type:type)
+}
+
+void push(button){
+    sendButtonEvent("pushed", button, "digital")
+}
+
+void hold(button){
+    sendButtonEvent("held", button, "digital")
+}
+
+void release(button){
+    sendButtonEvent("released", button, "digital")
+}
+
+void doubleTap(button){
+    sendButtonEvent("doubleTapped", button, "digital")
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+////////////        Learn the Z-Wave Class Versions Actually Implemented        ////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////// 
+
+
+void   getZwaveClassVersions(){
+    List<hubitat.zwave.Command> cmds = []
+	
+	List<Integer> ic = getDataValue("inClusters").split(",").collect{ hexStrToUnsignedInt(it) }
+    ic.each {
+		if (it) cmds.add(zwave.versionV3.versionCommandClassGet(requestedCommandClass:it))
+    }
+
+	// Software Version
+	cmds.add(zwave.versionV1.versionGet())
+
+	cmds.add(zwave.manufacturerSpecificV1.manufacturerSpecificGet())
+	
+    sendToDevice(cmds)
+}
+
+
+void zwaveEvent(hubitat.zwave.commands.versionv1.VersionCommandClassReport cmd) {
+    log.info "CommandClassReport- class:${ "0x${intToHexStr(cmd.requestedCommandClass)}" }, version:${cmd.commandClassVersion}"	
+
+    if (state.commandVersions == undefined) state.commandVersions = [:]
+    
+    state.commandVersions.put((cmd.requestedCommandClass).toInteger(), (cmd.commandClassVersion).toInteger())    
+	
+}
 ///////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////                  Central Scene Processing          ////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
-void zwaveEvent(hubitat.zwave.commands.associationv2.AssociationGroupingsReport cmd) {
-    if (logEnable) log.debug "${device.label?device.label:device.name}: ${cmd}"
-    log.info "${device.label?device.label:device.name}: Supported association groups: ${cmd.supportedGroupings}"
-    state.associationGroups = cmd.supportedGroupings
-}
+
 
 // This next 2 functions operates as a backup in case a release report was lost on the network
 // It will force a release to be sent if there has been a hold event and then
@@ -614,24 +736,3 @@ void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneNotification c
 	}
 }
 
-void sendButtonEvent(action, button, type){
-    String descriptionText = "${device.displayName} button ${button} was ${action} [${type}]"
-    if (txtEnable) log.info descriptionText
-    sendEvent(name:action, value:button, descriptionText:descriptionText, isStateChange:true, type:type)
-}
-
-void push(button){
-    sendButtonEvent("pushed", button, "digital")
-}
-
-void hold(button){
-    sendButtonEvent("held", button, "digital")
-}
-
-void release(button){
-    sendButtonEvent("released", button, "digital")
-}
-
-void doubleTap(button){
-    sendButtonEvent("doubleTapped", button, "digital")
-}
