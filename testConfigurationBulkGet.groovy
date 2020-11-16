@@ -1,7 +1,5 @@
 /*
-*	Zen21 Central Scene Switch
-*	version: 1.1
-*	Originally from: https://github.com/dds82/hubitat/blob/master/Drivers/zooz/zen21-switch.groovy
+*Simple Bulk Get Tester
 */
 
 import groovy.transform.Field
@@ -17,6 +15,7 @@ metadata {
 
 
 @Field static Map CMD_CLASS_VERS=[0x70:2]
+// 0x70 = 112 == 
 
 //////////////////////////////////////////////////////////////////////
 //////     code to Test Configuration Bulk Get Capabilities   ///////
