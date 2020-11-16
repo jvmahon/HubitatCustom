@@ -10,9 +10,7 @@ metadata {
 
         capability "Configuration"
     }
-
 }
-
 
 @Field static Map CMD_CLASS_VERS=[0x70:2]
 // 0x70 = 112 == 
@@ -20,7 +18,6 @@ metadata {
 //////////////////////////////////////////////////////////////////////
 //////     code to Test Configuration Bulk Get Capabilities   ///////
 ////////////////////////////////////////////////////////////////////// 
-
 
 void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationBulkReport cmd) {
 log.debug "Configuration Buk Report ${cmd}"
@@ -35,19 +32,14 @@ void getBulk()
 }
 
 
-
-
 //////////////////////////////////////////////////////////////////////
 //////        Handle Startup and Configuration Tasks           ///////
 //////   Refresh, Initialize, Configuration Capabilities       ///////
 ////////////////////////////////////////////////////////////////////// 
 
-
-
 void configure() {
 getBulk()
 }
-
 
 //////////////////////////////////////////////////////////////////////
 //////                  Z-Wave Helper Functions                ///////
@@ -106,7 +98,6 @@ String secure(String cmd){
 String secure(hubitat.zwave.Command cmd){
     return zwaveSecureEncap(cmd)
 }
-
 
 void zwaveEvent(hubitat.zwave.Command cmd) {
     if (logEnable) log.debug "skip:${cmd}"
