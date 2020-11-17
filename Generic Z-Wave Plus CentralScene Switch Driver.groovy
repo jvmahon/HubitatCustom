@@ -5,7 +5,7 @@
 */
 
 import groovy.transform.Field
-@Field def driverVersion = 0.1
+@Field def driverVersion = 0.6
 
 metadata {
     definition (name: "Testing Zwave Plus Central Scene Switch", namespace: "jvm", author:"jvm") {
@@ -509,7 +509,7 @@ void zwaveEvent(hubitat.zwave.commands.versionv1.VersionCommandClassReport cmd) 
 
     if (state.commandVersions == undefined) state.commandVersions = [:]
     
-    state.commandVersions.put((cmd.requestedCommandClass).toInteger(), (cmd.commandClassVersion).toInteger())    
+    state.commandVersions.put((cmd.requestedCommandClass).toInteger(), (cmd.commandClassVersion).toInteger())  
 	
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////
