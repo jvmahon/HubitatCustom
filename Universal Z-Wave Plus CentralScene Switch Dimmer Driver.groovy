@@ -6,7 +6,7 @@ if(state.commandVersions == null) state.commmandVersions = [:]
 metadata {
     definition (name: "Universal Zwave Plus Central Scene Switch", namespace: "jvm", author:"jvm") {
         capability "Switch"
-		capability "SwitchLevel"
+		// capability "SwitchLevel"
         capability "Refresh"
         // capability "Actuator" // Actuator doesn't actually do anything!
 		// capability "Sensor"		// Sensor doesn't actually do anything!
@@ -42,6 +42,7 @@ metadata {
         // input name: "associationsG2", type: "string", description: "To add nodes to associations use the Hexidecimal nodeID from the z-wave device list separated by commas into the space below", title: "Associations Group 2"
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
         input name: "txtEnable", type: "bool", title: "Enable text logging", defaultValue: false
+		input name: "confirmSend", type: "bool", title: "Always confirm new value after sending to device (reduces performance)", defaultValue: false
     }
 }
 @Field Map configParams = [
@@ -370,7 +371,8 @@ void  initialize()
 			pauseExecution(15000)
 		}
 	}
-
+	
+	pollDeviceData()
     refresh()
 	state.initialized = true
 }
@@ -394,20 +396,23 @@ void updated() {
 ////////////////////////////////////////////////////////////////////// 
 
 void zwaveEvent(hubitat.zwave.commands.switchbinaryv1.SwitchBinaryReport cmd) {
-    if (logEnable) log.debug "Received SwitchBinaryReport v1 containing: $cmd}"
+    if (logEnable) log.debug "Received SwitchBinaryReport v1 containing: ${cmd}"
     if (device.hasAttribute("switch") || device.hasCapability("Switch")) 
 	{
+		if (logEnable) log.debug  "${device.displayName} Sending a switch ${(cmd.value ? "on" : "off")} event"
+
 		eventProcess(	name: "switch", value: (cmd.value ? "on" : "off"), 
-						descriptionText: "Device ${device.displayName} set to ${value}.", type: "physical" )
+						descriptionText: "Device ${device.displayName} set to ${(cmd.value ? "on" : "off")}.", type: "physical" )
 	}
 }
 
 void zwaveEvent(hubitat.zwave.commands.switchbinaryv2.SwitchBinaryReport cmd) {
-    if (logEnable) log.debug "Received SwitchBinaryReport v1 containing: $cmd}"
+    if (logEnable) log.debug "Received SwitchBinaryReport v1 containing: ${cmd}"
     if (device.hasAttribute("switch") || device.hasCapability("Switch")) 
 	{
+		if (logEnable) log.debug  "${device.displayName} Sending a switch ${(cmd.value ? "on" : "off")} event"
 		eventProcess(	name: "switch", value: (cmd.value ? "on" : "off"), 
-						descriptionText: "Device ${device.displayName} set to ${value}.", type: "physical" )
+						descriptionText: "Device ${device.displayName} set to ${(cmd.value ? "on" : "off")}.", type: "physical" )
 	}
 }
 
@@ -507,57 +512,92 @@ void eventProcess(Map event) {
 
 void on() {
 	if (logEnable) log.debug "Executing function on()."
+	// state.isDigital=true	
 
-	if(device.currentValue("switch") == "off")
-	{
-		if (logEnable) log.debug "Sending ZWave BasicSet then BasicGet in function on()."
-		
-		state.isDigital=true
-		List<hubitat.zwave.Command> cmds = []
-			cmds.add(secure(zwave.basicV1.basicSet(value: 0xFF)))
-			
-			if (device.hasCapability("SwitchLevel") && (state.commandVersions?.get("32") == 1)) 
-			{
-				// if device is a dimmer and reporting is by Basic Report Version 1, then add a delay so that the transition can occur.
-				cmds.add("delay 3000")
-			}
-			cmds.add(secure(zwave.basicV1.basicGet()))	
-
-		sendToDevice(cmds)
-
-	} else
-	{
-		if (logEnable) log.debug "Device already on, no command sent to Z-Wave device in function on()."
-
-		sendEvent(name: "switch", value: "on", descriptionText: "Device ${device.displayName} remains at on", type: "digital", isStateChange: false)
+	if (device.hasCapability("SwitchLevel")) {
+		Integer levelValue = (device.currentValue("level") as Integer) ?: 99
+		sendToDevice(secure(zwave.basicV1.basicSet(value: levelValue )))		
 	}
+	else {
+		sendToDevice(secure(zwave.basicV1.basicSet(value: 255 )))
+	}
+	if( confirmSend ) sendToDevice (secure(zwave.basicV1.basicGet()))
+
+	sendEvent(name: "switch", value: "on", descriptionText: "Device ${device.displayName} turned on", 
+			type: "digital", isStateChange: (device.currentValue("switch") == "on") ? false : true )
 }
 
 void off() {
+    
 	if (logEnable) log.debug "Executing function off()."
-	if(device.currentValue("switch") == "on")
+	// state.isDigital=true	
+
+	/*
+	List<hubitat.zwave.Command> cmds = []
+		cmds.add(secure(zwave.basicV1.basicSet(value: 0 )))
+	sendToDevice(cmds)
+	*/
+	
+	sendToDevice (secure(zwave.basicV1.basicSet(value: 0 )))
+	if( confirmSend ) sendToDevice (secure(zwave.basicV1.basicGet()))
+	
+	sendEvent(name: "switch", value: "off", descriptionText: "Device ${device.displayName} turned off", 
+				type: "digital",  isStateChange: (device.currentValue("switch") == "off") ? false : true )
+    
+}
+
+void setlevel(level)
+{    
+    setLevel(level, 0)
+}
+
+void setLevel(level, duration)
+{
+	state.isDigital=true
+	if (logEnable) log.debug "Executing function setlevel(level, duration)."
+	if ( level < 0  ) level = 0
+	if ( level > 99 ) level = 99
+	if ( duration < 0 ) duration = 0
+	if ( duration > 127 ) duration = 127
+
+	if (level == 0)
 	{
-		if (logEnable) log.debug "Sending ZWave BasicSet then BasicGet in function off()."
-
-		state.isDigital=true
-		List<hubitat.zwave.Command> cmds = []
-			cmds.add(secure(zwave.basicV1.basicSet(value: 0x00)))
-
-			if (device.hasCapability("SwitchLevel") && (state.commandVersions?.get("32") == 1)) 
+		Boolean stateChange = ((device.currentValue("level") != 0) ? true : false)
+		sendEvent(name: "switch", value: "off", descriptionText: "Device ${device.displayName} remains at off", type: "digital", isStateChange: stateChange )
+		
+			List<hubitat.zwave.Command> cmds = []
+			if (state.commandVersions?.get("38") == 1)
 			{
-				// if device is a dimmer and reporting is by Basic Report Version 1, then add a delay so that the transition can occur.
-				cmds.add("delay 3000")
+				cmds.add(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: 0)))
+				log.warn "${device.displayName} does not support dimming duration settting command. Defaulting to dimming duration set by device parameters."
+			} else {
+				cmds.add(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: 0, dimmingDuration: duration)))
 			}
+        	if(cmds) sendToDevice(cmds)
 			
-			cmds.add(secure(zwave.basicV1.basicGet()))	
-			
-		sendToDevice(cmds)
-			} else
-	{
-		if (logEnable) log.debug "Device already off, no command sent to Z-Wave device in function off()."
-
-		sendEvent(name: "switch", value: "off", descriptionText: "Device ${device.displayName} remains at off", type: "digital", isStateChange: false)
+		return
 	}
+	
+	if (device.hasCapability("SwitchLevel")) {		
+		List<hubitat.zwave.Command> cmds = []
+			if (state.commandVersions?.get("38") == 1)
+			{
+				cmds.add(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: level)))
+				log.warn "${device.displayName} does not support dimming duration settting command. Defaulting to dimming duration set by device parameters."
+			} else {
+				cmds.add(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: level, dimmingDuration: duration)))
+			}
+        	if(cmds) sendToDevice(cmds)
+
+		}
+	log.debug "Current switch value is ${device.currentValue("switch")}"
+	if (device.currentValue("switch") == "off")
+		{	
+			log.debug "Turning switch on in setlevel function"
+			sendEvent(name: "switch", value: "on", descriptionText: "Device ${device.displayName} turned on", type: "digital", isStateChange: true)
+		}
+		
+	sendEvent(name: "level", value: level, descriptionText: "Device ${device.displayName} set to ${level}%", type: "digital", isStateChange: true)
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -815,8 +855,18 @@ int tapCount(attribute)
 			break
 	}
 }
+void zwaveEvent(hubitat.zwave.commands.centralscenev1.CentralSceneNotification cmd) {
+	ProcessCCReport(cmd)
+}
+void zwaveEvent(hubitat.zwave.commands.centralscenev2.CentralSceneNotification cmd) {
+	ProcessCCReport(cmd)
+}
 
-void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneNotification cmd) {
+void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneNotification cmd){
+	ProcessCCReport(cmd)
+}
+
+void ProcessCCReport(cmd) {
     Map event = [type:"physical", isStateChange:true]
 	if(logEnable) log.debug "Received Central Scene Notification ${cmd}"
 	
