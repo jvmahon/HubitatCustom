@@ -4,40 +4,59 @@ if(state.commandVersions == null) state.commmandVersions = [:]
        
 
 metadata {
-    definition (name: "Universal Zwave Plus Central Scene Switch", namespace: "jvm", author:"jvm") {
-        capability "Switch"
-		// capability "SwitchLevel"
-        capability "Refresh"
-        // capability "Actuator" // Actuator doesn't actually do anything!
-		// capability "Sensor"		// Sensor doesn't actually do anything!
-		
-        capability "Configuration"
-		capability "Initialize"	
-		
-        capability "PushableButton"
-        capability "HoldableButton"
-        capability "ReleasableButton"
-        capability "DoubleTapableButton"
-		
+    definition (name: "Universal Zwave Plus Central Scene Switch", namespace: "jvm", author:"jvm") 
+	{
 
-        // capability "Indicator"
+		// Pick one of the following 5 Capabilities. Comment out the remainder.
+			// capability "Bulb"
+			// capability "Light"
+			// capability "Outlet"		
+			// capability "RelaySwitch"
+			capability "Switch"		
 		
-		command "push", ["NUMBER"]
-        command "hold", ["NUMBER"]
-        command "release", ["NUMBER"]
-        command "doubleTap", ["NUMBER"]
+		// Include the following for dimmable devices.
+			// capability "SwitchLevel"
+			
+			
+			capability "Refresh"
+
+			
+			capability "Configuration"
+			capability "Initialize"	
 		
-	command "setParameter",[[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],
-				[name:"size",type:"NUMBER", description:"Parameter Size", constraints:["NUMBER"]],
-				[name:"value",type:"NUMBER", description:"Parameter Value", constraints:["NUMBER"]]
-				]
+		// Central Scene functions. Include the "commands" if you want to generate central scene actions from the web interface. If they are not included, central scene will still be generated from the device.
+			capability "PushableButton"
+				command "push", ["NUMBER"]	
 				
+			capability "HoldableButton"
+				command "hold", ["NUMBER"]
+				
+			capability "ReleasableButton"
+				command "release", ["NUMBER"]
+				
+			capability "DoubleTapableButton"
+					command "doubleTap", ["NUMBER"]
+			
+		// Capability is not fully implemented.
+			// capability "Indicator"
+			
+
+		// A generalized function for setting parameters.	
+			command "setParameter",[[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],
+					[name:"size",type:"NUMBER", description:"Parameter Size", constraints:["NUMBER"]],
+					[name:"value",type:"NUMBER", description:"Parameter Value", constraints:["NUMBER"]]
+					]
+			
+		// The following command is for debugging purposes.
+			command "clearStateData"
+			
         fingerprint mfr:"027A", prod:"B111", deviceId:"1E1C", inClusters:"0x5E,0x25,0x85,0x8E,0x59,0x55,0x86,0x72,0x5A,0x73,0x70,0x5B,0x6C,0x9F,0x7A", deviceJoinName: "Zooz Zen21 Switch" //US
 		
         fingerprint inClusters:"0x5E,0x25,0x85,0x8E,0x59,0x55,0x86,0x72,0x5A,0x73,0x70,0x5B,0x6C,0x9F,0x7A", deviceJoinName: "HomeSeer HS-WS100+" //US
     }
 	
-    preferences {
+    preferences 
+	{
         configParams.each { input it.value.input }
         // input name: "associationsG2", type: "string", description: "To add nodes to associations use the Hexidecimal nodeID from the z-wave device list separated by commas into the space below", title: "Associations Group 2"
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
@@ -299,6 +318,12 @@ void pollDeviceData() {
 //////   Refresh, Initialize, Configuration Capabilities       ///////
 ////////////////////////////////////////////////////////////////////// 
 
+void clearStateData()
+{
+	state.clear()
+	state.commandVersions = [:]
+}
+
 void refresh() {
 	if(txtEnable) "Refreshing device status .."
     List<hubitat.zwave.Command> cmds=[]
@@ -308,8 +333,7 @@ void refresh() {
 
 void installed() {
     if (logEnable) log.debug "installed ${device.label?device.label:device.name} ..."
-	state.clear()
-	state.commandVersions = [:]
+
 	
 	if(logEnable) log.debug "Command class version is ${state.commandVersions}. Gathering update."
 	
@@ -350,11 +374,13 @@ void  initialize()
     if(logEnable)
 	{
 		log.debug "Initializing ${device.displayName} at time: ${time}" 
+		/*
 		state.commandVersions.each
 			{key, value -> 
 				log.debug "commandVersions key ${key}, key class ${key.class}, value ${value}, value class ${value.class}"
 				log.debug "Driver Version is ${driverVersion}"
 			}
+		*/
 	}
     
 	if (((state.driverVersion as Integer) != (driverVersion as Integer)) || (state.configured != true))
@@ -367,8 +393,8 @@ void  initialize()
 	{
 		if (getZwaveClassVersions())
 		{
-			if(logEnable) log.debug "Pausing execution for 15 seconds to allow class versions to be gathered"
-			pauseExecution(15000)
+			if(logEnable) log.debug "Pausing execution for 10 seconds to allow class versions to be gathered"
+			pauseExecution(10000)
 		}
 	}
 	
@@ -951,3 +977,4 @@ void ProcessCCReport(cmd) {
 				break
 		}
 }
+
