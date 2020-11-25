@@ -2,7 +2,23 @@ import groovy.transform.Field
 @Field def driverVersion = 0.14
 if(state.commandVersions == null) state.commmandVersions = [:]
        
+@Field Map basicSwitchConfigParams = [
+        3: [input: [name: "configParam3", type: "enum", title: "LED Indicator Control", description: "", defaultValue: 0, options: [0:"Indicator is Off when switch is on",1:"Indicator is On when switch is On",2:"Indicator is always off"]], parameterSize: 1],
+        4: [input: [name: "configParam4", type: "enum", title: "On/Off Paddle Orientation", description: "", defaultValue: 0, options: [0:"Normal",1:"Reverse"]], parameterSize: 1],
+        5: [input: [name: "configParam5", type: "enum", title: "Another Paddle Orientation", description: "", defaultValue: 0, options: [0:"Normal",1:"Reverse"]], parameterSize: 1],
+ 
+]
 
+@Field Map HomeSeerWS200ConfigParams = [
+        3: [input: [name: "configParam3", type: "enum", title: "LED Indicator Control", description: "", defaultValue: 0, options: [0:"Indicator is Off when switch is on",1:"Indicator is On when switch is On",2:"Indicator is always off"]], parameterSize: 1],
+        4: [input: [name: "configParam4", type: "enum", title: "On/Off Paddle Orientation", description: "", defaultValue: 0, options: [0:"Normal",1:"Reverse"]], parameterSize: 1],
+        13: [input: [name: "configParam13", type: "enum", title: "Operation Mode", description: "", defaultValue: 0], parameterSize: 1],
+        14: [input: [name: "configParam14", type: "enum", title: "Normal Mode LED Color", description: "", defaultValue: 0], parameterSize: 1],
+        21: [input: [name: "configParam21", type: "enum", title: "Status Mode LED Color", description: "", defaultValue: 0], parameterSize: 1],
+        31: [input: [name: "configParam31", type: "enum", title: "LED Blink Frequency", description: "", defaultValue: 0], parameterSize: 1],
+    ]
+	
+	
 metadata {
     definition (name: "Universal Zwave Plus Central Scene Switch", namespace: "jvm", author:"jvm") 
 	{
@@ -57,11 +73,16 @@ metadata {
 	
     preferences 
 	{
-        configParams.each { input it.value.input }
-        // input name: "associationsG2", type: "string", description: "To add nodes to associations use the Hexidecimal nodeID from the z-wave device list separated by commas into the space below", title: "Associations Group 2"
-        input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
-        input name: "txtEnable", type: "bool", title: "Enable text logging", defaultValue: false
-		input name: "confirmSend", type: "bool", title: "Always confirm new value after sending to device (reduces performance)", defaultValue: false
+        input name: "advancedEnable", type: "bool", title: "Enable Advanced Configuration", defaultValue: false
+        
+        if (advancedEnable)
+        {
+			state.zwaveParameters?.each { input it.value.input }
+			// input name: "associationsG2", type: "string", description: "To add nodes to associations use the Hexidecimal nodeID from the z-wave device list separated by commas into the space below", title: "Associations Group 2"
+			input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
+			input name: "txtEnable", type: "bool", title: "Enable text logging", defaultValue: false
+			input name: "confirmSend", type: "bool", title: "Always confirm new value after sending to device (reduces performance)", defaultValue: false
+        }
     }
 }
 @Field Map configParams = [
@@ -349,6 +370,21 @@ void installed() {
 void configure() {
 	if (logEnable) log.debug "Current device data state: ${device}"
 	if (logEnable) log.debug "Current state data state: ${state}"
+	
+	if (getDataValue("deviceType") == "17479")
+        {
+            switch(getDataValue("deviceId"))
+            {
+                case "12341":
+                    // HomeSeerWS200ConfigParams.each { input it.value.input }
+                    myParameters = HomeSeerWS200ConfigParams
+					break
+                default : 
+                    // basicSwitchConfigParams.each { input it.value.input }
+					myParameters = basicSwitchConfigParams
+                    break
+            }
+	}
 	
 	// set to false to force a re-install
 	// state.installCompleted = true
