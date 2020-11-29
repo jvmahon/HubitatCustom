@@ -53,7 +53,6 @@ void getDeviceDataFromDatabase()
 
     String DeviceInfoURI = "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/list.php?filter=manufacturer:0x${manufacturer}%20${deviceType}:${deviceID}"
 
-    
     def mydevice
     
     httpGet([uri:DeviceInfoURI])
@@ -162,13 +161,12 @@ void updated()
 
         if ((v.lastRetrievedValue as Integer) != (settings.get(v.input.name) as Integer) )
         { 
-		
-			log.debug "Parameter ${k} Last retrieved value ${v.lastRetrievedValue}, requested settings value ${settings.get(v.input.name)}"
+			if (logEnable) log.debug "Parameter ${k} Last retrieved value ${v.lastRetrievedValue}, requested settings value ${settings.get(v.input.name)}"
 			setParameter(k, v.input.parameterSize, settings.get(v.input.name) ) 
         }
 		else
 		{
-			log.debug "Parameter ${k} is unchanged with value ${settings.get(v.input.name)}"
+			if (logEnable) log.debug "Parameter ${k} is unchanged with value ${settings.get(v.input.name)}"
 		}
      }
 }
@@ -187,7 +185,7 @@ void getParameterValue(parameterNumber)
 }
 
 void setParameter(parameterNumber, parameterSize, value){
-	log.debug "Setting parameter ${parameterNumber}, of size ${parameterSize} to value ${value}."
+	if (txtEnable) log.info "Setting parameter ${parameterNumber}, of size ${parameterSize} to value ${value}."
     if (parameterNumber.is( null ) || parameterSize.is( null ) || value.is( null )) {
 		log.warn "incomplete parameter list supplied..."
 		log.warn "syntax: setParameter(parameterNumber,parameterSize,value)"
@@ -201,8 +199,6 @@ void setParameter(parameterNumber, parameterSize, value){
 	cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber as Integer)))
 	
 	if (cmds) sendToDevice(cmds)
-
-
 }
 
 void pollDevicesForCurrentValues()
@@ -216,12 +212,19 @@ void pollDevicesForCurrentValues()
 
 void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) {
 	
-	log.debug "Received configuration report ${cmd} with scaled value ${cmd.scaledConfigurationValue}"
+	if(txtEnable) log.debug "Received configuration report for parameter ${cmd.parameterNumber} indicating parameter set to value: ${cmd.scaledConfigurationValue}. Full report contents are: ${cmd}."
 
 		String parameterName = "configParam${"${cmd.parameterNumber}".padLeft(3, "0")}"
 		def currentValue = settings[parameterName]
 		def reportedValue  = cmd.scaledConfigurationValue
-    
+		
+		// Sometimes the 	www.opemsmarthouse.org database has the wrong parameter sizes. This tries to correct that!
+		if (cmd.size != state.parameterTool.zwaveParameters["$cmd.parameterNumber"].input.parameterSize)
+		{
+			log.warn "Configuration report returned from device for parameter ${cmd.parameterNumber} indicates a size of ${cmd.size}, while the database from www.opensmarthouse.org gave a size of ${state.parameterTool.zwaveParameters["$cmd.parameterNumber"].input.parameterSize}. Please report to developer! Making correction to local database. Please try your parameter setting again."
+			state.parameterTool.zwaveParameters["$cmd.parameterNumber"].input.parameterSize = cmd.size
+		}
+		
 		if (currentValue != reportedValue)
 		{
 			settings[parameterName] = reportedValue
