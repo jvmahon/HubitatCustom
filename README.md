@@ -15,5 +15,8 @@ Some tips:
 
 
 
-#Universal Z-Wave Driver 
-This is still in "beta" and isn't ready for general testing. I'll update this page with some more information once I get time to develope it further.
+# Universal Z-Wave Driver 
+
+This is a device driver (dimmers & switches mostly) that will incoprorate the features of the Super Parameter Setting tool.
+
+This is still in "beta" and isn't ready for general use. I'll update this page with some more information once I get time to develope it further.
