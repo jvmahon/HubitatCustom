@@ -902,15 +902,11 @@ void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneSupportedRepor
 void forceReleaseMessage(button)
 {
 	// only need to force a release hold if the button state is "held" when the timer expires
-	log.warn "Central Scene Release message not received before timeout - Faking a release message!"
-	sendEvent(name:"released", value:button , type:"digital", isStateChange:true)
+    log.warn "Central Scene Release message for button ${button} not received before timeout - Faking a release message!"
+    sendEvent(name:"released", value:button , type:"digital", isStateChange:true, descriptionText:"${device.displayName} button ${button} forced release")
 	state."Button_${button}_LastState" = "released"
 }
 
-
-// The runIn() timer function does not provide a return handle that can be used to cancel it.
-// Instead, you have to cancel using the function name. For this reason, I had to define a separated
-// Function string for each button.
 void forceReleaseHold01(){ forceReleaseMessage(1)}
 void forceReleaseHold02(){ forceReleaseMessage(2)}
 void forceReleaseHold03(){ forceReleaseMessage(3)}
@@ -920,6 +916,45 @@ void forceReleaseHold06(){ forceReleaseMessage(6)}
 void forceReleaseHold07(){ forceReleaseMessage(7)}
 void forceReleaseHold08(){ forceReleaseMessage(8)}
 
+void cancelLostReleaseTimer(button)
+{
+    try{
+	switch(button)
+	    {
+	    case 1: unschedule(forceReleaseHold01); break
+	    case 2: unschedule(forceReleaseHold02); break
+	    case 3: unschedule(forceReleaseHold03); break
+	    case 4: unschedule(forceReleaseHold04); break
+	    case 5: unschedule(forceReleaseHold05); break
+	    case 6: unschedule(forceReleaseHold06); break
+	    case 7: unschedule(forceReleaseHold07); break
+	    case 8: unschedule(forceReleaseHold08); break
+	    default: log.warn "Attempted to process lost release message code for button ${button}, but this is an error as code handles a maximum of 8 buttons."
+	    }
+    }
+    catch(Exception ex) { log.debug "Exception in function cancelLostReleaseTimer: ${ex}"}
+
+}
+
+void setReleaseGuardTimer(button)
+{
+	// The code starts a release hold timer which will force a "release" to be issued
+	// if a refresh isn't received within the slow refresh period!
+	// If you get a refresh, executing again restarts the timer!
+	// Timer is canceled by the cancelLostReleaseTimer if a "real" release is received.
+	switch(button)
+	{
+	case 1: runIn(60, forceReleaseHold01); break
+	case 2: runIn(60, forceReleaseHold02); break
+	case 3: runIn(60, forceReleaseHold03); break
+	case 4: runIn(60, forceReleaseHold04); break
+	case 5: runIn(60, forceReleaseHold05); break
+	case 6: runIn(60, forceReleaseHold06); break
+	case 7: runIn(60, forceReleaseHold07); break
+	case 8: runIn(60, forceReleaseHold08); break
+	default: log.warn "Attempted to process lost release message code for button ${button}, but this is an error as code handles a maximum of 8 buttons."
+	}
+}
 
 // ==================  End of code to help handle a missing "Released" messages =====================
 
@@ -964,9 +999,9 @@ void ProcessCCReport(cmd) {
 	
 		if (state."Button_${cmd.sceneNumber}_LastState" == "held")
 		{
-			// if currently holding, and receive anything except another hold, 
+			// if currently holding, and receive anything except another hold or a release, 
 			// then cancel any outstanding lost "release" message timer ...
-			if (taps != (-2)) 
+			if ((taps != (-2)) && (taps != (-1))) 
 			{
 				// If you receive anything other than a release event, it means
 				// that the prior release event from the device was lost, so Hubitat
@@ -975,12 +1010,13 @@ void ProcessCCReport(cmd) {
 				forceReleaseMessage(cmd.sceneNumber)
 			}
 			// And cancel any timer that may be running for this held button.
-			unsubscribe("forceReleaseHold0${cmd.sceneNumber}")
+			cancelLostReleaseTimer(cmd.sceneNumber)
 		}
 
 		switch(taps)
 		{
-			case -1:		
+			case -1:
+                cancelLostReleaseTimer(cmd.sceneNumber)
 				event.name = "released" 
 				event.value = cmd.sceneNumber
 				event.descriptionText="${device.displayName} button ${event.value} released"
@@ -1011,7 +1047,7 @@ void ProcessCCReport(cmd) {
 				
 				// The following starts a guard timer to force a release hold if you don't get a refresh within the slow refresh period!
 				// If you get a refresh, executing again restarts the timer!
-					runIn(60, "forceReleaseHold0${cmd.sceneNumber}")
+				setReleaseGuardTimer(cmd.sceneNumber)
 				break
 				
 			case 1:
@@ -1039,3 +1075,4 @@ void ProcessCCReport(cmd) {
 				break
 		}
 }
+
