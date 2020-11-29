@@ -1,38 +1,57 @@
-import groovy.json.JsonSlurper
+/*
+Operation Sequence ...
+
+1. Get the device's firmware using: getFirmwareVersionFromDevice(), store it in state.parameterTool.firmware.[main: ##, sub: ##]
+2. Get the device's database record using: getDeviceDataFromDatabase
+
+
+*/
 
 metadata {
-        definition (name: "Super Parameter Tool",namespace: "jvm", author: "jvm") {
-           capability "Initialize"
+        definition (name: "Super Parameter Setting Tool",namespace: "jvm", author: "jvm") {
         
-    	command "getParameterInfo"
+		capability "Initialize"
+        
+    	command "getDeviceDataFromDatabase"
+		
+		// All data used by this driver is stored as a Map (more particulaly, as a Map of Maps) 
+		// in the state variable "state.parameterTool". The "uninstall" command deletes that key
+		// to clean up the data before the user changest back to the retular driver
         command "uninstall"
     }
     preferences 
 	{
-        input name: "advancedEnable", type: "bool", title: "Enable Advanced Configuration", defaultValue: false
+        input name: "advancedEnable", type: "bool", title: "Enable Advanced Configuration", defaultValue: true
         
         if (advancedEnable)
         {
-			input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
-			input name: "txtEnable", type: "bool", title: "Enable text logging", defaultValue: false
+			input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false
+			input name: "txtEnable", type: "bool", title: "Enable text logging", defaultValue: true
 			state.parameterTool?.zwaveParameters?.each { input it.value.input }
-
         }
     }
 }
 
-void getParameterInfo()
+/*
+//////////////////////////////////////////////////////////////////////
+//////      Get Device's Database Information Version          ///////
+////////////////////////////////////////////////////////////////////// 
+The function getDeviceDataFromDatabase() accesses the Z-Wave device database at www.opensmarthouse.org to
+retrieve a database record that contains a detailed descrption of the device.
+Since the database records are firmware-dependent, This function 
+should be called AFTER retrieving the device's firmware version using getFirmwareVersionFromDevice().
+*/
+void getDeviceDataFromDatabase()
 {
-log.debug "getting Parameter information"
+	if (logEnable) log.debug "Getting Device Information from Database"
   
 	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
 	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
 	String deviceID = 		hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceId").toInteger(), 2)
 	
-    log.debug " manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}, Version: ${state.parameterTool.firmware.main}, SubVersion: ${state.parameterTool.firmware.sub}"
+    if (logEnable) log.debug " manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}, Version: ${state.parameterTool.firmware.main}, SubVersion: ${state.parameterTool.firmware.sub}"
 
     String DeviceInfoURI = "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/list.php?filter=manufacturer:0x${manufacturer}%20${deviceType}:${deviceID}"
-
 
     
     def mydevice
@@ -42,7 +61,7 @@ log.debug "getting Parameter information"
         if(logEnable) log.debug "Response Data: ${resp.data}"
         if(logEnable) log.debug "Response Data class: ${resp.data instanceof Map}"
         
-        mydevice = resp.data.devices.find { element ->
+		mydevice = resp.data.devices.find { element ->
      
             Minimum_Version = element.version_min.split("\\.")
             Maximum_Version = element.version_max.split("\\.")
@@ -56,8 +75,7 @@ log.debug "getting Parameter information"
             Boolean belowMaximumVersion = (state.parameterTool.firmware.main < maxMainVersion) || ((state.parameterTool.firmware.main == maxMainVersion) && (state.parameterTool.firmware.sub <= maxSubVersion))
             
             aboveMinimumVersion && belowMaximumVersion
-            
-            }
+        }
 	}
 
     if(logEnable) log.debug "Database Identifier: ${mydevice.id}"  
@@ -68,8 +86,9 @@ log.debug "getting Parameter information"
     
      httpGet([uri:queryByDatabaseID])
         { resp->
-            // log.info "Response Data: ${resp.data.parameters}"
 			log.info "Processing data for device model: ${resp.data?.label}, Manufacturer: ${resp.data?.manufacturer?.label}"
+
+            if (logEnable) log.debug "Parameter Data in Response: ${resp.data.parameters}"
             allParameterData = resp.data.parameters
         }
 
@@ -104,23 +123,23 @@ log.debug "getting Parameter information"
             newInput.type = "integer"
         }
         if(logEnable) log.debug "deviceOptions is $deviceOptions"     
-        
-        
+             
         if(logEnable) log.debug "newInput = ${newInput}"
         state.parameterTool.zwaveParameters.put(it.param_id, [input: newInput])
-        
     }
     if (logEnable) log.debug newData
 }
 
-
+//////////////////////////////////////////////////////////////////////
+//////      Initialiation, update, and uninstall sequence          ///////
+////////////////////////////////////////////////////////////////////// 
 void initialize()
 {
-
     if(!state.parameterTool)  state.parameterTool = [:] 
     if(!state.parameterTool.zwaveParameters) state.parameterTool.zwaveParameters =[:]
-    getFirmwareVersion() // sets the firmware version in state.parameterTool.firmware[main: ??,sub: ??]
-    getParameterInfo()
+    getFirmwareVersionFromDevice() // sets the firmware version in state.parameterTool.firmware[main: ??,sub: ??]
+    getDeviceDataFromDatabase()
+	pollDevicesForCurrentValues()
 }
 
 void uninstall()
@@ -131,11 +150,83 @@ void uninstall()
 
 void updated()
 {
-log.info "Updated function called"
+	if (logEnable) log.debug "Updated function called"
 
-settings.each{ log.info "setting: ${it}"}
+	/*
+	state.parameterTool.zwaveParameters is arranged in key : value pairs.
+	key is the parameter #
+	value is a map of "input" controls, which is arranged under the sub-key "input"
+	so values are accessed as v.[input:[defaultValue:0, name:configParam004, parameterSize:1, options:[0:Normal, 1:Inverted], description:Controls the on/off orientation of the rocker switch, title:(4) Orientation, type:enum]]
+	*/
+	state.parameterTool.zwaveParameters.each { k , v -> 
 
-state.parameterTool.zwaveParameters.each{ k , v -> log.info "Key: ${k}, Value: ${v}"}
+        if ((v.lastRetrievedValue as Integer) != (settings.get(v.input.name) as Integer) )
+        { 
+		
+			log.debug "Parameter ${k} Last retrieved value ${v.lastRetrievedValue}, requested settings value ${settings.get(v.input.name)}"
+			setParameter(k, v.input.parameterSize, settings.get(v.input.name) ) 
+        }
+		else
+		{
+			log.debug "Parameter ${k} is unchanged with value ${settings.get(v.input.name)}"
+		}
+     }
+}
+
+//////////////////////////////////////////////////////////////////////
+///////        Set, Get, and Process Parameter Values         ////////
+////////////////////////////////////////////////////////////////////// 
+
+void getParameterValue(parameterNumber)
+{
+ 	log.debug "Getting value of parameter ${parameterNumber}"
+
+    List<hubitat.zwave.Command> cmds=[]	
+		cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber as Integer)))
+	if (cmds) sendToDevice(cmds)
+}
+
+void setParameter(parameterNumber, parameterSize, value){
+	log.debug "Setting parameter ${parameterNumber}, of size ${parameterSize} to value ${value}."
+    if (parameterNumber.is( null ) || parameterSize.is( null ) || value.is( null )) {
+		log.warn "incomplete parameter list supplied..."
+		log.warn "syntax: setParameter(parameterNumber,parameterSize,value)"
+		return
+    } 
+
+	List<hubitat.zwave.Command> cmds=[]
+
+	cmds.add(secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: value as Integer, parameterNumber: parameterNumber as Integer, size: parameterSize as Integer)))
+	cmds.add "delay 500"
+	cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber as Integer)))
+	
+	if (cmds) sendToDevice(cmds)
+
+
+}
+
+void pollDevicesForCurrentValues()
+{
+	// On startup, this should poll all the devices for their initial values!
+	state.parameterTool.zwaveParameters.each { k , v -> 
+		log.info "getting for key ${k}"
+		getParameterValue(k) 
+		}
+}
+
+void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) {
+	
+	log.debug "Received configuration report ${cmd} with scaled value ${cmd.scaledConfigurationValue}"
+
+		String parameterName = "configParam${"${cmd.parameterNumber}".padLeft(3, "0")}"
+		def currentValue = settings[parameterName]
+		def reportedValue  = cmd.scaledConfigurationValue
+    
+		if (currentValue != reportedValue)
+		{
+			settings[parameterName] = reportedValue
+		}
+		state.parameterTool.zwaveParameters["$cmd.parameterNumber"].lastRetrievedValue = cmd.scaledConfigurationValue
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -143,14 +234,14 @@ state.parameterTool.zwaveParameters.each{ k , v -> log.info "Key: ${k}, Value: $
 ////////////////////////////////////////////////////////////////////// 
 void queryForFirmwareReport()
 {
-if (logEnable) log.debug "Querying for firmware report"
+	if (logEnable) log.debug "Querying for firmware report"
 
     List<hubitat.zwave.Command> cmds = []
     cmds.add(zwave.versionV3.versionGet())
     sendToDevice(cmds)
 }
 
-void getFirmwareVersion()
+void getFirmwareVersionFromDevice()
 {
     if(!state.parameterTool.firmware)
 	{
@@ -172,17 +263,15 @@ void getFirmwareVersion()
     else
     {
        if (logEnable) log.debug "Firmware Version already exist: ${state.parameterTool.firmware}"
-
     }
 }
-
 
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
     if (logEnable) log.debug "For ${device.displayName}, Received V3 version report: ${cmd}"
 	if (state.parameterTool == null) state.parameterTool = [:]
     state.parameterTool.put("firmware", [main: cmd.firmware0Version, sub:cmd.firmware0SubVersion])
 	
-	log.debug "state is: ${state }, parameterTool is ${state.parameterTool}"
+	if (logEnable) log.debug "state is: ${state }, parameterTool is ${state.parameterTool}"
 
 }
 //////////////////////////////////////////////////////////////////////
@@ -253,18 +342,7 @@ void zwaveEvent(hubitat.zwave.Command cmd) {
     if (logEnable) log.debug "For ${device.displayName}, skipping command: ${cmd}"
 }
 
-void setParameter(parameterNumber = null, size = null, value = null){
-    List<hubitat.zwave.Command> cmds=[]
-    if (parameterNumber == null || size == null || value == null) {
-		log.warn "incomplete parameter list supplied..."
-		log.info "syntax: setParameter(parameterNumber,size,value)"
-		return
-    } 
-	
-	cmds.add(secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: value, parameterNumber: parameterNumber, size: size)))
-	cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber)))
-	sendToDevice(cmds)
-}
+
 
 //////////////////////////////////////////////////////////////////////
 
