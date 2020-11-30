@@ -8,7 +8,6 @@ Operation Sequence ...
 */
 
 if ( ! state.universalDriverData) { state.universalDriverData = [:] }
-if ( ! state.ZwaveClassVersions) { state.ZwaveClassVersions = [:] }
 
 metadata {
         definition (name: "Super Universal Zwave Plus Dimmer",namespace: "jvm", author: "jvm") {
@@ -47,7 +46,7 @@ metadata {
 		// in the state variable "state.universalDriverData". The "uninstall" command deletes that key
 		// to clean up the data before the user changest back to the retular driver
         command "uninstall"
-		
+		command "EraseState"
 		// A generalized function for setting parameters.	
 			command "setParameter",[[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],
 					[name:"size",type:"NUMBER", description:"Parameter Size", constraints:["NUMBER"]],
@@ -179,11 +178,16 @@ void refresh() {
 
 void installed()
 {
-    if(!state.universalDriverData)  state.universalDriverData = [:] 
-    if(!state.universalDriverData.zwaveParameters) state.universalDriverData.zwaveParameters =[:]
+    if (!state.universalDriverData)  state.universalDriverData = [:] 
+    if (!state.universalDriverData.zwaveParameters) state.universalDriverData.zwaveParameters =[:]
+	if (!state.universalDriverData.ZwaveClassVersions) state.universalDriverData.ZwaveClassVersions = [:]
+
     getFirmwareVersionFromDevice() // sets the firmware version in state.universalDriverData.firmware[main: ??,sub: ??]
-	getZwaveClassVersions()
+
     getDeviceDataFromDatabase()
+	
+	getZwaveClassVersions()
+		
 	pollDevicesForCurrentValues()
 }
 
@@ -191,19 +195,28 @@ void configure()
 {
 }
 
+void EraseState()
+{
+state.clear()
+}
+
 void initialize()
 {
-    if(!state.universalDriverData)  state.universalDriverData = [:] 
-    if(!state.universalDriverData.zwaveParameters) state.universalDriverData.zwaveParameters =[:]
+    if (!state.universalDriverData)  state.universalDriverData = [:] 
+    if (!state.universalDriverData.zwaveParameters) state.universalDriverData.zwaveParameters =[:]
+	if (!state.universalDriverData.ZwaveClassVersions) state.universalDriverData.ZwaveClassVersions = [:]
+
     getFirmwareVersionFromDevice() // sets the firmware version in state.universalDriverData.firmware[main: ??,sub: ??]
+    
+	getDeviceDataFromDatabase()
+	
 	getZwaveClassVersions()
-    getDeviceDataFromDatabase()
+
 	pollDevicesForCurrentValues()
 }
 
 void uninstall()
 {
-	//state.clear()
     state.remove("parameterTool")
 	state.remove("universalDriverData")
 	state.remove("ZwaveClassVersions")
@@ -262,7 +275,8 @@ void setParameter(parameterNumber, parameterSize, value){
 
 	List<hubitat.zwave.Command> cmds=[]
 
-	cmds.add(secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: value as Integer, parameterNumber: parameterNumber as Integer, size: parameterSize as Integer)))
+	// All versions of configurationSet work the same!
+	cmds.add(secure(zwave.configurationV2.configurationSet(scaledConfigurationValue: value as Integer, parameterNumber: parameterNumber as Integer, size: parameterSize as Integer)))
 	cmds.add "delay 500"
 	cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber as Integer)))
 	
@@ -284,10 +298,11 @@ void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) 
 		def reportedValue  = cmd.scaledConfigurationValue
 		
 		// Sometimes the 	www.opemsmarthouse.org database has the wrong parameter sizes. This tries to correct that!
-		if (cmd.size != state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].input.parameterSize)
+		Integer storedSize = state.universalDriverData.zwaveParameters["${cmd.parameterNumber}"].input.parameterSize
+		if (cmd.size != storedSize)
 		{
-			log.warn "Configuration report returned from device for parameter ${cmd.parameterNumber} indicates a size of ${cmd.size}, while the database from www.opensmarthouse.org gave a size of ${state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].input.parameterSize}. Please report to developer! Making correction to local database. Please try your parameter setting again."
-			state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].input.parameterSize = cmd.size
+			log.warn "Configuration report V2 returned from device for parameter ${cmd.parameterNumber} indicates a size of ${cmd.size}, while the database from www.opensmarthouse.org gave a size of ${storedSize}. Please report to developer! Making correction to local database. Please try your parameter setting again."
+			state.universalDriverData.zwaveParameters["${cmd.parameterNumber}"].input.put("parameterSize", cmd.size)
 		}
 		
 		if (currentValue != reportedValue)
@@ -309,7 +324,7 @@ void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
 		// Sometimes the 	www.opemsmarthouse.org database has the wrong parameter sizes. This tries to correct that!
 		if (cmd.size != state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].input.parameterSize)
 		{
-			log.warn "Configuration report returned from device for parameter ${cmd.parameterNumber} indicates a size of ${cmd.size}, while the database from www.opensmarthouse.org gave a size of ${state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].input.parameterSize}. Please report to developer! Making correction to local database. Please try your parameter setting again."
+			log.warn "Configuration report V1 returned from device for parameter ${cmd.parameterNumber} indicates a size of ${cmd.size}, while the database from www.opensmarthouse.org gave a size of ${state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].input.parameterSize}. Please report to developer! Making correction to local database. Please try your parameter setting again."
 			state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].input.parameterSize = cmd.size
 		}
 		
@@ -325,7 +340,7 @@ void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
 void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
     if (logEnable) log.debug "For ${device.displayName}, Supervision get: ${cmd}"
 	
-	Map parseMap = state.ZwaveClassVersions.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
+	Map parseMap = state.universalDriverData.ZwaveClassVersions.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
     hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap)
 	
     if (encapsulatedCommand) {
@@ -386,7 +401,7 @@ void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
 void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
     // hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
 
-	Map parseMap = state.ZwaveClassVersions.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
+	Map parseMap = state.universalDriverData.ZwaveClassVersions.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
     hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap)
 	
     if (encapsulatedCommand) {
@@ -455,32 +470,35 @@ void zwaveEvent(hubitat.zwave.Command cmd) {
 
 
 /*	
-	0x20:2  // Basic
-	0x5B:3, // Central Scene, Max is 3
-	0x86:3, // version V1, Max is 3
-	0x72:2,	// Manufacturere Specific, Max is 2
-	0x8E:3, // Multi-Channel Assoication. Max is 4
-	0x85:2, // Association, max is 3
-	0x59:1, // Association Grp Info, Max is 3
-	0x70:1,// Configuration. Max is 2
+	0x20:2  (32) // Basic
+	0x25:   (37)	//  Switch Binary
+	0x26:	(38) // Switch Multilevel
+	0x5B:3, (91) // Central Scene, Max is 3
+	0x6C	(108)// supervision
+	0x70:1, (112)// Configuration. Max is 2
+	0x86:3, (134) // version V1, Max is 3
 */
 
 Integer   getZwaveClassVersions(){
     List<hubitat.zwave.Command> cmds = []
 	Integer getItems = 0
 	
-	if(logEnable) log.debug "Current Command Class version state is: ${state.ZwaveClassVersions}"
+	if(logEnable) log.debug "Current Command Class version state is: ${state.universalDriverData.ZwaveClassVersions}"
 	
-	List<Integer> ic = getDataValue("inClusters").split(",").collect{ hexStrToUnsignedInt(it) }
-	ic << 32 // Add Basic 
+	// All the inclusters suppored by the device
+	List<Integer> deviceInclusters = getDataValue("inClusters").split(",").collect{ hexStrToUnsignedInt(it) as Integer }
+		deviceInclusters << 32
+	
+	// The next list is the classes actually used by this driver. We only need info. on those classes!
+	List<Integer> driverInclusters = [0x20, 0x25, 0x26, 0x5B, 0x6C, 0x70, 0x86]
 
-    ic.each {
+    driverInclusters.each {
 	
-		if (it) 
+	if (deviceInclusters.contains(it)) 
 		{
 			Integer thisClass = it as Integer
 			
-			if ( !state.ZwaveClassVersions?.get(thisClass as Integer) && !state.ZwaveClassVersions?.get(thisClass as String) )
+			if ( !state.universalDriverData.ZwaveClassVersions?.get(thisClass as Integer) && !state.universalDriverData.ZwaveClassVersions?.get(thisClass as String) )
 			{
 	
 			getItems += 1
@@ -498,21 +516,21 @@ Integer   getZwaveClassVersions(){
 
 // There are 3 versions of command class reports - could just include only the highest and let Groovy resolve!
 void zwaveEvent(hubitat.zwave.commands.versionv1.VersionCommandClassReport cmd) {
-	if(logEnable) log.debug "Processing command class report V1 to update state.ZwaveClassVersions"
-	if (! state.ZwaveClassVersions) {	state.ZwaveClassVersions = [:] }
-	state.ZwaveClassVersions?.put((cmd.requestedCommandClass as String), (cmd.commandClassVersion as Integer))
+	if(logEnable) log.debug "Processing command class report V1 to update state.universalDriverData.ZwaveClassVersions"
+	state.universalDriverData.ZwaveClassVersions?.put((cmd.requestedCommandClass as String), (cmd.commandClassVersion as Integer))
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv2.VersionCommandClassReport cmd) {
-	if(logEnable) log.debug "Processing command class report V2 to update state.ZwaveClassVersions"
-	if (! state.ZwaveClassVersions) {	state.ZwaveClassVersions = [:] }
-	state.ZwaveClassVersions?.put((cmd.requestedCommandClass as String), (cmd.commandClassVersion as Integer))
+	if(logEnable) log.debug "Processing command class report V2 to update state.universalDriverData.ZwaveClassVersions"
+	state.universalDriverData.ZwaveClassVersions?.put((cmd.requestedCommandClass as String), (cmd.commandClassVersion as Integer))
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionCommandClassReport cmd) {
-	if(logEnable) log.debug "Processing command class report V3 to update state.ZwaveClassVersions"
-	if (! state.ZwaveClassVersions) {	state.ZwaveClassVersions = [:] }
-	state.ZwaveClassVersions?.put((cmd.requestedCommandClass as String), (cmd.commandClassVersion as Integer))
+	if(logEnable) log.debug "Processing command class report V3 to update state.universalDriverData.ZwaveClassVersions received command ${cmd}. Current stored value array is ${state.universalDriverData.ZwaveClassVersions}."
+	if (! state.universalDriverData) state.universalDriverData = [:]
+	state.universalDriverData.ZwaveClassVersions.put(cmd.requestedCommandClass, cmd.commandClassVersion)
+
+	if(logEnable) log.debug "Array after adding value is ${state.universalDriverData.ZwaveClassVersions}."
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -910,7 +928,7 @@ void setLevel(level, duration = 0)
 		sendEvent(name: "switch", value: "off", descriptionText: "Device ${device.displayName} remains at off", type: "digital", isStateChange: stateChange )
 		
 			List<hubitat.zwave.Command> cmds = []
-			if (state.ZwaveClassVersions?.get("38") == 1)
+			if (state.universalDriverData.ZwaveClassVersions?.get("38") == 1)
 			{
 				cmds.add(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: 0)))
 				log.warn "${device.displayName} does not support dimming duration settting command. Defaulting to dimming duration set by device parameters."
@@ -924,7 +942,7 @@ void setLevel(level, duration = 0)
 	
 	if (device.hasCapability("SwitchLevel")) {		
 		List<hubitat.zwave.Command> cmds = []
-			if (state.ZwaveClassVersions?.get("38") == 1)
+			if (state.universalDriverData.ZwaveClassVersions?.get("38") < 1)
 			{
 				cmds.add(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: level)))
 				log.warn "${device.displayName} does not support dimming duration settting command. Defaulting to dimming duration set by device parameters."
