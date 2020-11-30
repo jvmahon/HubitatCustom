@@ -157,7 +157,7 @@ void updated()
 	value is a map of "input" controls, which is arranged under the sub-key "input"
 	so values are accessed as v.[input:[defaultValue:0, name:configParam004, parameterSize:1, options:[0:Normal, 1:Inverted], description:Controls the on/off orientation of the rocker switch, title:(4) Orientation, type:enum]]
 	*/
-	state.parameterTool.zwaveParameters.each { k , v -> 
+	state.parameterTool?.zwaveParameters.each { k , v -> 
 
         if ((v.lastRetrievedValue as Integer) != (settings.get(v.input.name) as Integer) )
         { 
