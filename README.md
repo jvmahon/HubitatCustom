@@ -6,7 +6,7 @@ This is a parameter setting tool that uses the device's manufacturer, device typ
 This is still a work-in-progress.
 
 Some tips:
-* Install the driver on the "Driver Code" page. I twill appear with the name "Super Parameter Setting Tool"
+* Install the driver on the "Driver Code" page. It will appear with the name "Super Parameter Setting Tool"
 * Go to the device that you want to work on and select this tool as its driver.
 * Click on the "Initialize" control to pull the data from the database and to poll your device for its current parameter settings.
 * The "Preferences" area should now show controls for all of the parameters.  If everything worked right, the controls should show the current settings of your device
