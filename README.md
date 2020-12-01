@@ -3,7 +3,7 @@
 
 This is a parameter setting tool that uses the device's manufacturer, device type, and device ID information to retrieve parameter setting information from a dabase.
 
-This is still a work-in-progress.
+This is still a work-in-progress. Estimate first release by Dec. 15, 2020.
 
 Some tips:
 * Install the driver on the "Driver Code" page. It will appear with the name "Super Parameter Setting Tool"
