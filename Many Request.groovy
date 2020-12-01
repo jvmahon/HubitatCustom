@@ -34,7 +34,7 @@ void initialize()
 
 void updated()
 {
-	if (logEnable) log.debug "Updated function called"
+	if (logEnable) log.debug "Updated function called. No other action!"
 }
 
 void cleanup()
