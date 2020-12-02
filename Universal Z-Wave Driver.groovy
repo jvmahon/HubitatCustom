@@ -86,7 +86,13 @@ void getDeviceDataFromDatabase()
 	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
 	String deviceID = 		hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceId").toInteger(), 2)
 	
-    if (logEnable) log.debug " manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}, Version: ${state.universalDriverData.firmware.main}, SubVersion: ${state.universalDriverData.firmware.sub}"
+    if( !state.universalDriverData.firmware)
+    {
+        log.debug "Firmware Info. is missing. This may happen after a clearing of state data. re-querying for firmware version"
+        queryForFirmwareReport()
+        pauseExecution(3000)
+    }
+    if (logEnable) log.debug " manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}, Version: ${state.universalDriverData?.firmware.main}, SubVersion: ${state.universalDriverData.firmware.sub}"
 
     String DeviceInfoURI = "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/list.php?filter=manufacturer:0x${manufacturer}%20${deviceType}:${deviceID}"
 
