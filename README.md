@@ -3,7 +3,7 @@
 
 This is a parameter setting tool that uses the device's manufacturer, device type, and device ID information to retrieve parameter setting information from a dabase.
 
-#### This is still a work-in-progress. Estimate first release by Dec. 15, 2020. Work is still being done to handle bitmap parameters (so recommendatino is that you don't fork this repository for your own use yet!)
+#### This is still a work-in-progress. Estimate first release by Dec. 15, 2020. Work is still being done to handle bitmap parameters (so recommendation is that you don't fork this repository for your own use yet!)
 
 Some tips:
 * Install the driver on the "Driver Code" page. It will appear with the name "Super Parameter Setting Tool"
