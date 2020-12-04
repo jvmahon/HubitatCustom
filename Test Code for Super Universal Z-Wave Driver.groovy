@@ -329,6 +329,33 @@ void updated()
 	value is a map of "input" controls, which is arranged under the sub-key "input"
 	so values are accessed as v.[input:[defaultValue:0, name:configParam004, parameterSize:1, options:[0:Normal, 1:Inverted], description:Controls the on/off orientation of the rocker switch, title:(4) Orientation, type:enum]]
 	*/
+        def integerSettings = [:]
+       	state.universalDriverData?.zwaveParameters.each { Pkey , Pvalue -> 
+            // log.debug "zwaveParameter: ${Pkey} has name ${Pvalue.input.name}"
+            
+            if( settings.containsKey(Pvalue.input.name))
+            {
+                // log.debug "Setting: ${Pvalue.input.name} = ${settings[Pvalue.input.name]}, and is of type ${settings[Pvalue.input.name].class}"
+                
+                Integer newValue = 0
+                
+                if (settings[Pvalue.input.name] instanceof ArrayList) 
+                {
+                    settings[Pvalue.input.name].each{ newValue += it as Integer }
+                }
+                else  {   
+                    newValue = settings[Pvalue.input.name] as Integer  
+                }
+ 
+                if ((Pvalue.lastRetrievedValue as Integer) != newValue )
+                {
+                    setParameter(Pkey, Pvalue.input.parameterSize, newValue ) 
+                }
+
+            }
+        } 
+        
+    /*
 	state.universalDriverData?.zwaveParameters.each { k , v -> 
 
         Integer newValue = 0
@@ -337,9 +364,6 @@ void updated()
             newValue += it as Integer
         }
 
-
-
-        
         if ((v.lastRetrievedValue as Integer) != newValue )
         { 
 			if (logEnable) log.debug "Parameter ${k} Last retrieved value ${v.lastRetrievedValue}, requested settings value ${newValue}"
@@ -349,7 +373,8 @@ void updated()
 		{
 			if (logEnable) log.debug "Parameter ${k} is unchanged with value ${newValue}"
 		}
-     }
+     } 
+    */
 }
 
 //////////////////////////////////////////////////////////////////////
