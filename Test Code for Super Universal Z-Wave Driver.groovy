@@ -205,19 +205,23 @@ Map createInputControls(data)
 		log.warn "current data is: $it"
 		if (it.bitmask.toInteger())
 		{
-			if (!inputcontrols[it.param_id])
+            
+			if (!(inputControls?.get(it.param_id)))
 			{
-						log.warn "Have not finished bitmap controls. adding firs entry"
+			// log.warn "Have not finished bitmap controls. adding first entry"
+               //  log.debug inputControls
 
-				Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) ${it.label}", description: it.description, defaultValue: it.default, parameterSize:it.size, type:"enum", multiple: true, options: [:]]
-				newInput.options[32] = "This is a dummy"
+				Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) Choose Multiple", parameterSize:it.size, type:"enum", multiple: true, options: [:]]
+
+                newInput.options.put(it.bitmask.toInteger(), "${it.description}")
 				
-				inputControls[it.param_id] = [input: newInput]
+				inputControls.put(it.param_id, [input: newInput])
 
 			}
 			else // add to the existing bitmap control
 			{
-			log.warn "Have not finished bitmap controls"
+                // log.warn "Adding to existing bitmap controls ${it.bitmask.toInteger()}, ${it.label}, ${it.options[1].label}"
+                inputControls[it.param_id].input.options.put(it.bitmask.toInteger(), "${it.label} - ${it.options[1].label}")
 			}
 
 		}
