@@ -331,14 +331,23 @@ void updated()
 	*/
 	state.universalDriverData?.zwaveParameters.each { k , v -> 
 
-        if ((v.lastRetrievedValue as Integer) != (settings.get(v.input.name) as Integer) )
+        Integer newValue = 0
+        
+        settings.get(v.input.name).each{
+            newValue += it as Integer
+        }
+
+
+
+        
+        if ((v.lastRetrievedValue as Integer) != newValue )
         { 
-			if (logEnable) log.debug "Parameter ${k} Last retrieved value ${v.lastRetrievedValue}, requested settings value ${settings.get(v.input.name)}"
-			setParameter(k, v.input.parameterSize, settings.get(v.input.name) ) 
+			if (logEnable) log.debug "Parameter ${k} Last retrieved value ${v.lastRetrievedValue}, requested settings value ${newValue}"
+			setParameter(k, v.input.parameterSize, newValue ) 
         }
 		else
 		{
-			if (logEnable) log.debug "Parameter ${k} is unchanged with value ${settings.get(v.input.name)}"
+			if (logEnable) log.debug "Parameter ${k} is unchanged with value ${newValue}"
 		}
      }
 }
