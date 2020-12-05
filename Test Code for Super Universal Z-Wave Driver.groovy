@@ -91,9 +91,7 @@ void getDeviceDataFromDatabase()
 	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
 	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
 	String deviceID = 		hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceId").toInteger(), 2)
-	
-    if( !state.firmware)  {  getFirmwareVersionFromDevice()  }
-    
+ 
     if (logEnable) log.debug " manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}, Version: ${state.firmware.main}, SubVersion: ${state.firmware.sub}"
 
     String DeviceInfoURI = "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/list.php?filter=manufacturer:0x${manufacturer}%20${deviceType}:${deviceID}"
@@ -104,22 +102,23 @@ void getDeviceDataFromDatabase()
     { resp->
         if(logEnable) log.debug "Response Data: ${resp.data}"
         if(logEnable) log.debug "Response Data class: ${resp.data instanceof Map}"
-        
-		mydevice = resp.data.devices.find { element ->
-     
-            Minimum_Version = element.version_min.split("\\.")
-            Maximum_Version = element.version_max.split("\\.")
-            Integer minMainVersion = Minimum_Version[0].toInteger()
-            Integer minSubVersion = Minimum_Version[1].toInteger()
-            Integer maxMainVersion = Maximum_Version[0].toInteger()
-            Integer maxSubVersion =   Maximum_Version[1].toInteger()        
-    
-            Boolean aboveMinimumVersion = (state.firmware.main > minMainVersion) || ((state.firmware.main == minMainVersion) && (state.firmware.sub >= minSubVersion))
-			
-            Boolean belowMaximumVersion = (state.firmware.main < maxMainVersion) || ((state.firmware.main == maxMainVersion) && (state.firmware.sub <= maxSubVersion))
-            
-            aboveMinimumVersion && belowMaximumVersion
-        }
+
+			mydevice = resp.data.devices.find { element ->
+		 
+				Minimum_Version = element.version_min.split("\\.")
+				Maximum_Version = element.version_max.split("\\.")
+				Integer minMainVersion = Minimum_Version[0].toInteger()
+				Integer minSubVersion = Minimum_Version[1].toInteger()
+				Integer maxMainVersion = Maximum_Version[0].toInteger()
+				Integer maxSubVersion =   Maximum_Version[1].toInteger()        
+				log.debug "state.firmware is ${state.firmware}"
+				Boolean aboveMinimumVersion = (state.firmware.main > minMainVersion) || ((state.firmware.main == minMainVersion) && (state.firmware.sub >= minSubVersion))
+				
+				Boolean belowMaximumVersion = (state.firmware.main < maxMainVersion) || ((state.firmware.main == maxMainVersion) && (state.firmware.sub <= maxSubVersion))
+				
+				aboveMinimumVersion && belowMaximumVersion
+			}
+
 	}
 
     if(logEnable) log.debug "Database Identifier: ${mydevice.id}"  
@@ -144,16 +143,16 @@ Map createInputControls(data)
 
 	data.each
 	{
-		log.warn "current data is: $it"
+		if (logEnable) log.debug "current data is: $it"
 		if (it.bitmask.toInteger())
 		{
 			if (!(inputControls?.get(it.param_id)))
 			{
-				Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) Choose Multiple", parameterSize:it.size, type:"enum", multiple: true, options: [:]]
+				Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) Choose Multiple", type:"enum", multiple: true, options: [:]]
 
                 newInput.options.put(it.bitmask.toInteger(), "${it.description}")
 				
-				inputControls.put(it.param_id, [input: newInput])
+				inputControls.put(it.param_id, [input: newInput, parameterData:[size:it.size]])
 			}
 			else // add to the existing bitmap control
 			{
@@ -162,7 +161,7 @@ Map createInputControls(data)
 		}
 		else
 		{
-			Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) ${it.label}", description: it.description, defaultValue: it.default, parameterSize:it.size]
+			Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) ${it.label}", description: it.description, defaultValue: it.default]
 			
 			def deviceOptions = [:]
 			it.options.each
@@ -184,7 +183,7 @@ Map createInputControls(data)
 				 
 			if(logEnable) log.debug "newInput = ${newInput}"
 			
-			inputControls[it.param_id] = [input: newInput]
+			inputControls[it.param_id] = [input: newInput, parameterData:[size:it.size]]
 		}
 	}
 	return inputControls
@@ -232,11 +231,11 @@ void initialize()
 	if (!state.ZwaveClassVersions) state.ZwaveClassVersions = [:]
 
     getFirmwareVersionFromDevice() // sets the firmware version in state.firmware[main: ??,sub: ??]
-    
+	pauseExecution(2000)
+  	getZwaveClassVersions()
+  
 	getDeviceDataFromDatabase()
 	
-	getZwaveClassVersions()
-
 	pollDevicesForCurrentValues()
 }
 
@@ -269,7 +268,7 @@ void updated()
 	state.universalDriverData.zwaveParameters is arranged in key : value pairs.
 	key is the parameter #
 	value is a map of "input" controls, which is arranged under the sub-key "input"
-	so values are accessed as v.[input:[defaultValue:0, name:configParam004, parameterSize:1, options:[0:Normal, 1:Inverted], description:Controls the on/off orientation of the rocker switch, title:(4) Orientation, type:enum]]
+	so values are accessed as v.[input:[defaultValue:0, name:configParam004, options:[0:Normal, 1:Inverted], description:Controls the on/off orientation of the rocker switch, title:(4) Orientation, type:enum]]
 	*/
 	def integerSettings = [:]
 	state.universalDriverData?.zwaveParameters.each { Pkey , Pvalue -> 
@@ -288,10 +287,10 @@ void updated()
 				newValue = settings[Pvalue.input.name] as Integer  
 			}
 			
-			if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${Pvalue.lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(Pvalue.lastRetrievedValue as Integer) != newValue}."
-			if ((Pvalue.lastRetrievedValue as Integer) != newValue )
+			if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${Pvalue.parameterData.lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(Pvalue.parameterData.lastRetrievedValue as Integer) != newValue}."
+			if ((Pvalue.parameterData.lastRetrievedValue as Integer) != newValue )
 			{
-				setParameter(Pkey, Pvalue.input.parameterSize, newValue ) 
+				setParameter(Pkey, Pvalue.parameterData.size, newValue ) 
 			}
 		}
 	} 
@@ -342,7 +341,7 @@ void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) 
 		def reportedValue  = cmd.scaledConfigurationValue
 		
 		// Sometimes the www.opemsmarthouse.org database has the wrong parameter sizes. Following code tries to correct that!
-		Integer storedSize = state.universalDriverData.zwaveParameters["${cmd.parameterNumber}"].input.parameterSize
+		Integer storedSize = state.universalDriverData.zwaveParameters["${cmd.parameterNumber}"].parameterData.size
 		if (cmd.size != storedSize)
 		{
 			log.warn "Configuration report V2 returned from device for parameter ${cmd.parameterNumber} indicates a size of ${cmd.size}, while the database from www.opensmarthouse.org gave a size of ${storedSize}. Please report to developer! Making correction to local database. Please try your parameter setting again."
@@ -353,7 +352,7 @@ void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) 
 		{
 			settings[parameterName] = reportedValue
 		}
-		state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].lastRetrievedValue = cmd.scaledConfigurationValue
+		state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].parameterData.lastRetrievedValue = cmd.scaledConfigurationValue
 }
 
 // This is the exact same code as the preceding, with a v1 as the signature!
@@ -366,17 +365,17 @@ void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
 		def reportedValue  = cmd.scaledConfigurationValue
 		
 		// Sometimes the 	www.opemsmarthouse.org database has the wrong parameter sizes. This tries to correct that!
-		if (cmd.size != state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].input.parameterSize)
+		if (cmd.size != state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].parameterData.size)
 		{
-			log.warn "Configuration report V1 returned from device for parameter ${cmd.parameterNumber} indicates a size of ${cmd.size}, while the database from www.opensmarthouse.org gave a size of ${state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].input.parameterSize}. Please report to developer! Making correction to local database. Please try your parameter setting again."
-			state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].input.parameterSize = cmd.size
+			log.warn "Configuration report V1 returned from device for parameter ${cmd.parameterNumber} indicates a size of ${cmd.size}, while the database from www.opensmarthouse.org gave a size of ${state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].parameterData.size}. Please report to developer! Making correction to local database. Please try your parameter setting again."
+			state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].parameterData.size = cmd.size
 		}
 		
 		if (currentValue != reportedValue)
 		{
 			settings[parameterName] = reportedValue
 		}
-		state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].lastRetrievedValue = cmd.scaledConfigurationValue
+		state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].parameterData.lastRetrievedValue = cmd.scaledConfigurationValue
 }
 //////////////////////////////////////////////////////////////////////
 //////                  Handle Supervision request            ///////
@@ -406,40 +405,33 @@ void queryForFirmwareReport()
 
 void getFirmwareVersionFromDevice()
 {
-    if(!state.firmware)
+	if (logEnable) log.debug "Calling getFirmwareVersionFromDevice with !state.firmware ${!state.firmware} and its value is: ${state.get("firmware")}"
+    if(!(state.firmware && state?.firmware.main && state?.firmware.sub))
 	{
 		queryForFirmwareReport()
-		pauseExecution(5000)
 	}
-	/*
-    if(!state.firmware)
-	{
-        state.firmware = [:]
-		def deviceVersion = "${device.getDataValue("firmwareVersion")}".split("\\.")
-		if(deviceVersion)
-		{
-			state.firmware.main =deviceVersion[0].toInteger()
-			state.firmware.sub = deviceVersion[1].toInteger()
-			if (logEnable) log.debug "Firmware Version is: ${state.firmware}"
-		}
-		else
-		{
-		if (logEnable) log.debug "Missing Firmware Version - have to get the firmware - run a ZWave Query!"
-		queryForFirmwareReport()
-		pauseExecution(5000)
-		}
-	}
-    else
-    {
-       if (logEnable) log.debug "Firmware Version already exist: ${state.firmware}"
-    }
-	*/
+}
+
+void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
+    log.debug "For ${device.displayName}, Received V1 version report: ${cmd}"
+	if (! state.firmware) state.firmware = [:]
+	state.put("firmware", [main: cmd.applicationVersion, sub: cmd.applicationSubVersion])
+
+	log.info "Firmware version is: ${state.get("firmware")}"
+}
+
+void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {
+    log.debug "For ${device.displayName}, Received V2 version report: ${cmd}"
+	if (! state.firmware) state.firmware = [:]
+	state.put("firmware", [main: cmd.firmware0Version, sub: cmd.firmware0SubVersion])
+	log.info "Firmware version is: ${state.get("firmware")}"
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
-    if (logEnable) log.debug "For ${device.displayName}, Received V3 version report: ${cmd}"
-	if (state.universalDriverData == null) state.universalDriverData = [:]
-    state.universalDriverData.put("firmware", [main: cmd.firmware0Version, sub:cmd.firmware0SubVersion])
+    log.debug "For ${device.displayName}, Received V3 version report: ${cmd}"
+	if (! state.firmware) state.firmware = [:]
+	state.put("firmware", [main: cmd.firmware0Version, sub: cmd.firmware0SubVersion])
+	log.info "Firmware version is: ${state.get("firmware")}"
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -450,7 +442,7 @@ void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
 void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
     // hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
 
-	Map parseMap = state.ZwaveClassVersions.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
+	Map parseMap = state.ZwaveClassVersions?.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
     hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap)
 	
     if (encapsulatedCommand) {
@@ -460,7 +452,7 @@ void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation c
 
 void parse(String description) {
     // if (logEnable) log.debug "For ${device.displayName}, parse:${description}"
-	Map parseMap = state.ZwaveClassVersions.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
+	Map parseMap = state.ZwaveClassVersions?.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
 
     hubitat.zwave.Command cmd = zwave.parse(description, parseMap)
 
@@ -561,21 +553,26 @@ Integer   getZwaveClassVersions(){
 
 // There are 3 versions of command class reports - could just include only the highest and let Groovy resolve!
 void zwaveEvent(hubitat.zwave.commands.versionv1.VersionCommandClassReport cmd) {
-	if(logEnable) log.debug "Processing command class report V1 to update state.ZwaveClassVersions"
-	state.ZwaveClassVersions?.put((cmd.requestedCommandClass as String), (cmd.commandClassVersion as Integer))
+	processVersionCommandClassReport (cmd)
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv2.VersionCommandClassReport cmd) {
-	if(logEnable) log.debug "Processing command class report V2 to update state.ZwaveClassVersions"
-	state.ZwaveClassVersions?.put((cmd.requestedCommandClass as String), (cmd.commandClassVersion as Integer))
+	processVersionCommandClassReport (cmd)
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionCommandClassReport cmd) {
-	if(logEnable) log.debug "Processing command class report V3 to update state.ZwaveClassVersions received command ${cmd}. Current stored value array is ${state.ZwaveClassVersions}."
-	if (! state.universalDriverData) state.universalDriverData = [:]
-	state.ZwaveClassVersions.put(cmd.requestedCommandClass, cmd.commandClassVersion)
+	processVersionCommandClassReport (cmd)
+}
 
-	if(logEnable) log.debug "Array after adding value is ${state.ZwaveClassVersions}."
+void processVersionCommandClassReport (cmd) {
+	if(logEnable) log.debug "Processing command class report to update state.ZwaveClassVersions received command ${cmd}. Current stored value array is ${state.ZwaveClassVersions}."
+	
+	if (! state.containsKey("ZwaveClassVersions")) state.put("ZwaveClassVersions", [(cmd.requestedCommandClass) : (cmd.commandClassVersion)])
+	else
+	state.ZwaveClassVersions.put((cmd.requestedCommandClass), (cmd.commandClassVersion))
+
+	// For unknown reasons, a get following a put seems to "make sure" the value has been stored in state.
+	state.get("ZwaveClassVersions")
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
