@@ -74,16 +74,19 @@ metadata {
 //////      Get Device's Database Information Version          ///////
 ////////////////////////////////////////////////////////////////////// 
 The function getDeviceDataFromDatabase() accesses the Z-Wave device database at www.opensmarthouse.org to
-retrieve a database record that contains a detailed descrption of the device.
+retrieve a database record that contains a detailed description of the device.
 Since the database records are firmware-dependent, This function 
 should be called AFTER retrieving the device's firmware version using getFirmwareVersionFromDevice().
 */
 void getDeviceDataFromDatabase()
 {
-    if (!state.opensmarthouse) state.opensmarthouse = [:]
-    if (!state.opensmarthouse.parameters) state.opensmarthouse.parameters = [:]
-    
-	if (logEnable) log.debug "Getting Device Information from Database"
+	if( state.universalDriverData.zwaveParameters)
+	{
+		log.debug "Already have parameter data. No need to retrieving again!"
+		return
+	}
+
+	if (txtEnable) log.info "Getting Device Information from www.opensmarthouse.org Database"
   
 	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
 	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
@@ -121,77 +124,16 @@ void getDeviceDataFromDatabase()
 
     if(logEnable) log.debug "Database Identifier: ${mydevice.id}"  
     
-    String queryByDatabaseID= "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/read.php?device_id=${mydevice.id}" 
+    String queryByDatabaseID= "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/read.php?device_id=${mydevice.id}"    
     
-    
-     httpGet([uri:queryByDatabaseID])
+	httpGet([uri:queryByDatabaseID])
         { resp->
 			log.info "Retrieved data for device model: ${resp.data?.label}, Manufacturer: ${resp.data?.manufacturer?.label}"
             allParameterData = resp.data.parameters
             // if (logEnable) log.debug "Parameter Data in Response: ${allParameterData}"
         }
 
-	state.opensmarthouse.parameters = allParameterData
-	
-
-    log.debug "Converting Database Data to Input Fields"
-	/*
-    log.debug "Converting Database Data to Input Fields"
-    
-    allParameterData.each{
-                if(logEnable) log.debug "Parameter ${it.param_id}: label: ${it.label}, Is Bitmask: ${it.bitmask}:${it.bitmask.toInteger() == 0 ? false : true }"
-                }
-    def allInputs = []
-    
-    def newData = allParameterData.each{
-		createInputDevice(it)
-	
-        if (it.bitmask.toInteger())
-		{
-		log.warn "Parameter ${it.param_id} is specified in bitmap form. This is currently unsupported"
-		return
-		}
-		
-        Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) ${it.label}", description: it.description, defaultValue: it.default, parameterSize:it.size]
-        def deviceOptions = [:]
-        it.options.each
-        {
-            deviceOptions.put(it.value, it.label)
-        }
-        
-        // Set input type. Should be one of: bool, date, decimal, email, enum, number, password, time, text. See: https://docs.hubitat.com/index.php?title=Device_Preferences
-        if (deviceOptions)
-        {
-            newInput.type = "enum"
-            newInput.options = deviceOptions
-        }
-        else
-        {
-            newInput.type = "integer"
-        }
-        if(logEnable) log.debug "deviceOptions is $deviceOptions"     
-             
-        if(logEnable) log.debug "newInput = ${newInput}"
-        state.universalDriverData.zwaveParameters.put(it.param_id, [input: newInput])
-    }
-    if (logEnable) log.debug newData	
-	*/
-    
-	/*
-    def newData = allParameterData.each
-	{
-		if(logEnable) log.debug "Parameter ${it.param_id}: label: ${it.label}, Is Bitmask: ${it.bitmask}:${it.bitmask.toInteger() == 0 ? false : true }"
-
- 		def newInputControl = createInputControl(it)
-		log.warn "new input control is: $newInputControl"
-		
-		if (newInputControl) state.universalDriverData.zwaveParameters.put(it.param_id, [input: newInputControl])
-    }
-	*/
-	
-	def newInputControls = createInputControls(allParameterData)
-	if (newInputControls) state.universalDriverData.zwaveParameters = newInputControls
-
+	state.universalDriverData.zwaveParameters = createInputControls(allParameterData)
 	
     if (logEnable) log.debug newData
 }
@@ -205,25 +147,18 @@ Map createInputControls(data)
 		log.warn "current data is: $it"
 		if (it.bitmask.toInteger())
 		{
-            
 			if (!(inputControls?.get(it.param_id)))
 			{
-			// log.warn "Have not finished bitmap controls. adding first entry"
-               //  log.debug inputControls
-
 				Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) Choose Multiple", parameterSize:it.size, type:"enum", multiple: true, options: [:]]
 
                 newInput.options.put(it.bitmask.toInteger(), "${it.description}")
 				
 				inputControls.put(it.param_id, [input: newInput])
-
 			}
 			else // add to the existing bitmap control
 			{
-                // log.warn "Adding to existing bitmap controls ${it.bitmask.toInteger()}, ${it.label}, ${it.options[1].label}"
                 inputControls[it.param_id].input.options.put(it.bitmask.toInteger(), "${it.label} - ${it.options[1].label}")
 			}
-
 		}
 		else
 		{
@@ -252,7 +187,6 @@ Map createInputControls(data)
 			inputControls[it.param_id] = [input: newInput]
 		}
 	}
-	
 	return inputControls
 }
 
@@ -283,12 +217,12 @@ void installed()
 
 void configure()
 {
-initialize()
+	initialize()
 }
 
 void EraseState()
 {
-state.clear()
+	state.clear()
 }
 
 void initialize()
@@ -310,7 +244,15 @@ void uninstall()
 {
     state.remove("parameterTool")
 	state.remove("universalDriverData")
+	state.remove("universalDriverState")
 	state.remove("ZwaveClassVersions")
+	state.remove("opensmarthouse")
+	device.removeDataValue("firmwareVersion")
+	device.removeDataValue("hardwareVersion")
+	device.removeDataValue("protocolVersion")
+	device.removeDataValue("zwaveAssociationG1")
+    device.removeDataValue("zwNodeInfo")
+
 }
 
 void logsOff(){
@@ -329,52 +271,30 @@ void updated()
 	value is a map of "input" controls, which is arranged under the sub-key "input"
 	so values are accessed as v.[input:[defaultValue:0, name:configParam004, parameterSize:1, options:[0:Normal, 1:Inverted], description:Controls the on/off orientation of the rocker switch, title:(4) Orientation, type:enum]]
 	*/
-        def integerSettings = [:]
-       	state.universalDriverData?.zwaveParameters.each { Pkey , Pvalue -> 
-            // log.debug "zwaveParameter: ${Pkey} has name ${Pvalue.input.name}"
-            
-            if( settings.containsKey(Pvalue.input.name))
-            {
-                // log.debug "Setting: ${Pvalue.input.name} = ${settings[Pvalue.input.name]}, and is of type ${settings[Pvalue.input.name].class}"
-                
-                Integer newValue = 0
-                
-                if (settings[Pvalue.input.name] instanceof ArrayList) 
-                {
-                    settings[Pvalue.input.name].each{ newValue += it as Integer }
-                }
-                else  {   
-                    newValue = settings[Pvalue.input.name] as Integer  
-                }
- 
-                if ((Pvalue.lastRetrievedValue as Integer) != newValue )
-                {
-                    setParameter(Pkey, Pvalue.input.parameterSize, newValue ) 
-                }
-
-            }
-        } 
-        
-    /*
-	state.universalDriverData?.zwaveParameters.each { k , v -> 
-
-        Integer newValue = 0
-        
-        settings.get(v.input.name).each{
-            newValue += it as Integer
-        }
-
-        if ((v.lastRetrievedValue as Integer) != newValue )
-        { 
-			if (logEnable) log.debug "Parameter ${k} Last retrieved value ${v.lastRetrievedValue}, requested settings value ${newValue}"
-			setParameter(k, v.input.parameterSize, newValue ) 
-        }
-		else
+	def integerSettings = [:]
+	state.universalDriverData?.zwaveParameters.each { Pkey , Pvalue -> 
+		
+		if( settings.containsKey(Pvalue.input.name))
 		{
-			if (logEnable) log.debug "Parameter ${k} is unchanged with value ${newValue}"
+			if (logEnable) log.debug "Setting: ${Pvalue.input.name} = ${settings[Pvalue.input.name]}, and is of type ${settings[Pvalue.input.name].class}"
+			
+			Integer newValue = 0
+			
+			if (settings[Pvalue.input.name] instanceof ArrayList) 
+			{
+				settings[Pvalue.input.name].each{ newValue += it as Integer }
+			}
+			else  {   
+				newValue = settings[Pvalue.input.name] as Integer  
+			}
+			
+			if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${Pvalue.lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(Pvalue.lastRetrievedValue as Integer) != newValue}."
+			if ((Pvalue.lastRetrievedValue as Integer) != newValue )
+			{
+				setParameter(Pkey, Pvalue.input.parameterSize, newValue ) 
+			}
 		}
-     } 
-    */
+	} 
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -409,8 +329,7 @@ void setParameter(parameterNumber, parameterSize, value){
 }
 
 void pollDevicesForCurrentValues()
-{
-	// On startup, this should poll all the devices for their initial values!
+{ 	// On startup, poll all the devices for their initial values!
 	state.universalDriverData.zwaveParameters.each { k , v -> getParameterValue(k)  }
 }
 
@@ -422,7 +341,7 @@ void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) 
 		def currentValue = settings[parameterName]
 		def reportedValue  = cmd.scaledConfigurationValue
 		
-		// Sometimes the 	www.opemsmarthouse.org database has the wrong parameter sizes. This tries to correct that!
+		// Sometimes the www.opemsmarthouse.org database has the wrong parameter sizes. Following code tries to correct that!
 		Integer storedSize = state.universalDriverData.zwaveParameters["${cmd.parameterNumber}"].input.parameterSize
 		if (cmd.size != storedSize)
 		{
@@ -489,6 +408,12 @@ void getFirmwareVersionFromDevice()
 {
     if(!state.firmware)
 	{
+		queryForFirmwareReport()
+		pauseExecution(5000)
+	}
+	/*
+    if(!state.firmware)
+	{
         state.firmware = [:]
 		def deviceVersion = "${device.getDataValue("firmwareVersion")}".split("\\.")
 		if(deviceVersion)
@@ -499,7 +424,7 @@ void getFirmwareVersionFromDevice()
 		}
 		else
 		{
-		log.warn "Missing Firmware Version - have to get the firmware - run a ZWave Query!"
+		if (logEnable) log.debug "Missing Firmware Version - have to get the firmware - run a ZWave Query!"
 		queryForFirmwareReport()
 		pauseExecution(5000)
 		}
@@ -508,16 +433,15 @@ void getFirmwareVersionFromDevice()
     {
        if (logEnable) log.debug "Firmware Version already exist: ${state.firmware}"
     }
+	*/
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
     if (logEnable) log.debug "For ${device.displayName}, Received V3 version report: ${cmd}"
 	if (state.universalDriverData == null) state.universalDriverData = [:]
     state.universalDriverData.put("firmware", [main: cmd.firmware0Version, sub:cmd.firmware0SubVersion])
-	
-	if (logEnable) log.debug "state is: ${state }, state.universalDriverData is ${state.universalDriverData}"
-
 }
+
 //////////////////////////////////////////////////////////////////////
 //////                  Z-Wave Helper Functions                ///////
 //////   Format messages, Send to Device, secure Messages      ///////
@@ -536,8 +460,9 @@ void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation c
 
 void parse(String description) {
     // if (logEnable) log.debug "For ${device.displayName}, parse:${description}"
+	Map parseMap = state.ZwaveClassVersions.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
 
-    hubitat.zwave.Command cmd = zwave.parse(description)
+    hubitat.zwave.Command cmd = zwave.parse(description, parseMap)
 
     if (cmd) {
         zwaveEvent(cmd)
@@ -586,14 +511,10 @@ void zwaveEvent(hubitat.zwave.Command cmd) {
     if (logEnable) log.debug "For ${device.displayName}, skipping command: ${cmd}"
 }
 
-
-
 //////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////
 ////////////        Learn the Z-Wave Class Versions Actually Implemented        ////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////// 
-
-
 /*	
 	0x20:2  (32) // Basic
 	0x25:   (37)	//  Switch Binary
@@ -625,11 +546,10 @@ Integer   getZwaveClassVersions(){
 			
 			if ( !state.ZwaveClassVersions?.get(thisClass as Integer) && !state.ZwaveClassVersions?.get(thisClass as String) )
 			{
-	
-			getItems += 1
-			if(logEnable) log.debug "Requesting Command class version for class 0x${intToHexStr(it)}"
-			// gets are the same in all command class versions
-			cmds.add(zwave.versionV3.versionCommandClassGet(requestedCommandClass:it.toInteger()))
+				getItems += 1
+				if(logEnable) log.debug "Requesting Command class version for class 0x${intToHexStr(it)}"
+				// gets are the same in all command class versions
+				cmds.add(zwave.versionV3.versionCommandClassGet(requestedCommandClass:it.toInteger()))
 			}
 		}
     }
@@ -688,7 +608,6 @@ void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneSupportedRepor
 	sendEvent(name: "numberOfButtons", value: cmd.supportedScenes, isStateChange:true)
 }
 
-
 // This next 2 functions operates as a backup in case a release report was lost on the network
 // It will force a release to be sent if there has been a hold event and then
 // a release has not occurred within the central scene hold button refresh period.
@@ -700,7 +619,6 @@ void forceReleaseMessage(button)
     log.warn "Central Scene Release message for button ${button} not received before timeout - Faking a release message!"
     sendEvent(name:"released", value:button , type:"digital", isStateChange:true, descriptionText:"${device.displayName} button ${button} forced release")
 	state.universalDriverState.buttons.put(button, "released")
-
 }
 
 void forceReleaseHold01(){ forceReleaseMessage(1)}
@@ -729,7 +647,6 @@ void cancelLostReleaseTimer(button)
 	    }
     }
     catch(Exception ex) { log.debug "Exception in function cancelLostReleaseTimer: ${ex}"}
-
 }
 
 void setReleaseGuardTimer(button)
@@ -780,7 +697,6 @@ void zwaveEvent(hubitat.zwave.commands.centralscenev1.CentralSceneNotification c
 void zwaveEvent(hubitat.zwave.commands.centralscenev2.CentralSceneNotification cmd) {
 	ProcessCCReport(cmd)
 }
-
 void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneNotification cmd){
 	ProcessCCReport(cmd)
 }
@@ -876,7 +792,6 @@ if (! state.universalDriverState.buttons) { state.universalDriverState.buttons =
 		}
 }
 
-
 //////////////////////////////////////////////////////////////////////
 //////        Handle Basic Reports and Device Functions        ///////
 ////////////////////////////////////////////////////////////////////// 
@@ -942,42 +857,21 @@ void zwaveEvent(hubitat.zwave.commands.basicv2.BasicReport cmd) {
 
 //returns on physical v1
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv1.SwitchMultilevelReport cmd){
-
-	if (logEnable) log.debug "Received MultiLevel v1 Report containing: $cmd}"
-    if (device.hasAttribute("switch") || device.hasCapability("Switch")) 
-	{
-		eventProcess(	name: "switch", value: (cmd.value ? "on" : "off"), 
-						descriptionText: "Device ${device.displayName} set to ${(cmd.value ? "on" : "off")}", type: "physical" )
-	}
-
-    if ((device.hasAttribute("level")  || device.hasCapability("SwitchLevel") ) && (cmd.value != 0))
-	{
-		eventProcess( 	name: "level", value: cmd.value, 
-						descriptionText: "Device ${device.displayName} level set to ${cmd.value}%", type: "physical" )
-	}
-	state.universalDriverData.put("isDigital", false)
+	processMultilevelReport(cmd)
 }
 
 //returns on physical v2
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv2.SwitchMultilevelReport cmd){
-    if (logEnable) log.debug "SwitchMultilevelV2Report value: ${cmd}"
-    if (device.hasAttribute("switch") || device.hasCapability("Switch")) 
-	{
-		eventProcess(	name: "switch", value: (cmd.value ? "on" : "off"), 
-						descriptionText: "Device ${device.displayName} set to ${(cmd.value ? "on" : "off")}", type: "physical" )
-	}
-
-    if ((device.hasAttribute("level")  || device.hasCapability("SwitchLevel") ) && (cmd.value != 0))
-	{
-		eventProcess( 	name: "level", value: cmd.value, 
-						descriptionText: "Device ${device.displayName} level set to ${cmd.value}%", type: "physical" )
-	}
-	state.universalDriverData.put("isDigital", false)
+	processMultilevelReport(cmd)
 }
 
 //returns on physical v3
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelReport cmd){
-    if (logEnable) log.debug "SwitchMultilevelV3Report value: ${cmd}"
+	processMultilevelReport(cmd)
+}
+
+void processMultilevelReport(cmd)
+{
     if (device.hasAttribute("switch") || device.hasCapability("Switch")) 
 	{
 		eventProcess(	name: "switch", value: (cmd.value ? "on" : "off"), 
@@ -986,16 +880,16 @@ void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelReport
 
     if ((device.hasAttribute("level")  || device.hasCapability("SwitchLevel") ) && (cmd.value != 0))
 	{
-		eventProcess( 	name: "level", value: cmd.value, 
+		// z-wave level values only go to 99. Treat 99 as a 100%
+		eventProcess( 	name: "level", value: (cmd.value == 99) ? 100: cmd.value, 
 						descriptionText: "Device ${device.displayName} level set to ${cmd.value}%", type: "physical" )
 	}
 	state.universalDriverData.put("isDigital", false)
 }
 
-
 void eventProcess(Map event) {
     if (device.currentValue(event.name).toString() != event.value.toString() ) {
-	log.debug "${device.displayName} has current value ${device.currentValue(event.name).toString()} and new event value ${event.value.toString()}."
+	if (logEnable) log.debug "${device.displayName} has current value ${device.currentValue(event.name).toString()} and new event value ${event.value.toString()}."
         event.isStateChange=true
         sendEvent(event)
     }
@@ -1037,7 +931,6 @@ void off() {
 	}
 }
 
-
 void setLevel(level, duration = 0)
 {
 	state.universalDriverData.put("isDigital", true)
@@ -1045,7 +938,11 @@ void setLevel(level, duration = 0)
 	if ( level < 0  ) level = 0
 	if ( level > 99 ) level = 99
 	if ( duration < 0 ) duration = 0
-	if ( duration > 127 ) duration = 127
+	if ( duration > 120 ) 
+		{
+			log.warn "For device ${device.displayName}, tried to set a dimming duration value greater than 120 seconds. To avoid excessive turn on / off delays, this driver only allows dimming duration values of up to 127."
+			duration = 120
+		}
 
 	if (level == 0)
 	{
