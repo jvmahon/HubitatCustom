@@ -11,6 +11,8 @@ metadata {
 // Firmware version gets used in the next function
 void getDeviceDataFromDatabase()
 {
+    log.info "Firmware version in getDeviceDataFromDatabase is: ${state.get("firmware")}"
+
     log.debug " manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}, Version: ${state.firmware.main}, SubVersion: ${state.firmware.sub}"
 }
 
@@ -52,21 +54,21 @@ void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
     log.debug "For ${device.displayName}, Received V1 version report: ${cmd}"
 	if (! state.firmware) state.firmware = [:]
 	state.put("firmware", [main: cmd.applicationVersion, sub: cmd.applicationSubVersion])
-	log.info "Firmware version is: ${state.get("firmware")}"
+	log.info "Firmware version in VersionReport is: ${state.get("firmware")}"
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {
     log.debug "For ${device.displayName}, Received V2 version report: ${cmd}"
 	if (! state.firmware) state.firmware = [:]
 	state.put("firmware", [main: cmd.firmware0Version, sub: cmd.firmware0SubVersion])
-	log.info "Firmware version is: ${state.get("firmware")}"
+	log.info "Firmware version in VersionReport is: ${state.get("firmware")}"
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
     log.debug "For ${device.displayName}, Received V3 version report: ${cmd}"
 	if (! state.firmware) state.firmware = [:]
 	state.put("firmware", [main: cmd.firmware0Version, sub: cmd.firmware0SubVersion])
-	log.info "Firmware version is: ${state.get("firmware")}"
+	log.info "Firmware version in VersionReport is: ${state.get("firmware")}"
 }
 
 //////////////////////////////////////////////////////////////////////
