@@ -6,7 +6,6 @@ Operation Sequence ...
 
 
 */
-
 if ( ! state.universalDriverData) { state.universalDriverData = [:] }
 
 metadata {
@@ -103,24 +102,28 @@ void getDeviceDataFromDatabase()
         if(logEnable) log.debug "Response Data: ${resp.data}"
         if(logEnable) log.debug "Response Data class: ${resp.data instanceof Map}"
 
-			mydevice = resp.data.devices.find { element ->
-		 
-				Minimum_Version = element.version_min.split("\\.")
-				Maximum_Version = element.version_max.split("\\.")
-				Integer minMainVersion = Minimum_Version[0].toInteger()
-				Integer minSubVersion = Minimum_Version[1].toInteger()
-				Integer maxMainVersion = Maximum_Version[0].toInteger()
-				Integer maxSubVersion =   Maximum_Version[1].toInteger()        
-				log.debug "state.firmware is ${state.firmware}"
-				Boolean aboveMinimumVersion = (state.firmware.main > minMainVersion) || ((state.firmware.main == minMainVersion) && (state.firmware.sub >= minSubVersion))
-				
-				Boolean belowMaximumVersion = (state.firmware.main < maxMainVersion) || ((state.firmware.main == maxMainVersion) && (state.firmware.sub <= maxSubVersion))
-				
-				aboveMinimumVersion && belowMaximumVersion
-			}
 
+                log.info "Response data size is ${resp.data.devices.size()}"
+			    mydevice = resp.data.devices.find { element ->
+		 
+				    Minimum_Version = element.version_min.split("\\.")
+				    Maximum_Version = element.version_max.split("\\.")
+				    Integer minMainVersion = Minimum_Version[0].toInteger()
+				    Integer minSubVersion = Minimum_Version[1].toInteger()
+				    Integer maxMainVersion = Maximum_Version[0].toInteger()
+				    Integer maxSubVersion =   Maximum_Version[1].toInteger()        
+				    if(logEnable) log.debug "state.firmware in getDeviceDataFromDatabase httpGet is ${state.firmware}"
+
+				    Boolean aboveMinimumVersion = (state.firmware?.main > minMainVersion) || ((state.firmware?.main == minMainVersion) && (state.firmware?.sub >= minSubVersion))
+				
+				    Boolean belowMaximumVersion = (state.firmware?.main < maxMainVersion) || ((state.firmware?.main == maxMainVersion) && (state.firmware?.sub <= maxSubVersion))
+				
+				    aboveMinimumVersion && belowMaximumVersion
+			    }
 	}
 
+    if (! mydevice.id) log.warn "No database entry found for manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}"
+    
     if(logEnable) log.debug "Database Identifier: ${mydevice.id}"  
     
     String queryByDatabaseID= "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/read.php?device_id=${mydevice.id}"    
@@ -156,7 +159,12 @@ Map createInputControls(data)
 			}
 			else // add to the existing bitmap control
 			{
-                inputControls[it.param_id].input.options.put(it.bitmask.toInteger(), "${it.label} - ${it.options[1].label}")
+                Map Options = inputControls[it.param_id].input.options
+                Options.put(it.bitmask.toInteger(), "${it.label} - ${it.options[1].label}")
+                Options = Options.sort()
+                log.debug "Sorted bitmap Options: ${Options}"
+             
+                inputControls[it.param_id].input.options = Options
 			}
 		}
 		else
@@ -416,7 +424,6 @@ void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
     log.debug "For ${device.displayName}, Received V1 version report: ${cmd}"
 	if (! state.firmware) state.firmware = [:]
 	state.put("firmware", [main: cmd.applicationVersion, sub: cmd.applicationSubVersion])
-
 	log.info "Firmware version is: ${state.get("firmware")}"
 }
 
