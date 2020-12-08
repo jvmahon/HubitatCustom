@@ -79,7 +79,7 @@ should be called AFTER retrieving the device's firmware version using getFirmwar
 */
 void getDeviceDataFromDatabase()
 {
-	if( state.universalDriverData.zwaveParameters)
+	if( state.universalDriverData?.zwaveParameters)
 	{
 		log.debug "Already have parameter data. No need to retrieving again!"
 		return
@@ -135,19 +135,25 @@ void getDeviceDataFromDatabase()
             // if (logEnable) log.debug "Parameter Data in Response: ${allParameterData}"
         }
 
+	allParameterData.each
+	{
+		state.zwaveParameterData.put(it.param_id, [size:it.size])
+	}
 	state.universalDriverData.zwaveParameters = createInputControls(allParameterData)
 	
     if (logEnable) log.debug newData
 	
 	/** pollDevicesForCurrentValues starts here instead of in initialize() to ensure the state has been updated -- concern is a Hubitat state saving race condition described here: https://community.hubitat.com/t/2-2-4-156-bug-setting-state-variable-race-condition-c7/57893/16
 	*/
-	pollDevicesForCurrentValues()
+
 }
 
 Map createInputControls(data)
 {
 	Map inputControls = [:]
 
+	log.debug "Creating Input Controls"
+	
 	data.each
 	{
 		if (logEnable) log.debug "current data is: $it"
@@ -159,7 +165,7 @@ Map createInputControls(data)
 
                 newInput.options.put(it.bitmask.toInteger(), "${it.description}")
 				
-				inputControls.put(it.param_id, [input: newInput, parameterData:[size:it.size]])
+				inputControls.put(it.param_id, [input: newInput])
 			}
 			else // add to the existing bitmap control
 			{
@@ -195,7 +201,7 @@ Map createInputControls(data)
 				 
 			if(logEnable) log.debug "newInput = ${newInput}"
 			
-			inputControls[it.param_id] = [input: newInput, parameterData:[size:it.size]]
+			inputControls[it.param_id] = [input: newInput]
 		}
 	}
 	return inputControls
@@ -216,6 +222,7 @@ void installed()
     if (!state.universalDriverData)  state.universalDriverData = [:] 
     if (!state.universalDriverData.zwaveParameters) state.universalDriverData.zwaveParameters =[:]
 	if (!state.ZwaveClassVersions) state.ZwaveClassVersions = [:]
+	if (!state.zwaveParameterData) state.zwaveParameterData = [:]
 
 	initialize()
 }
@@ -235,6 +242,7 @@ void initialize()
     if (!state.universalDriverData)  state.universalDriverData = [:] 
     if (!state.universalDriverData.zwaveParameters) state.universalDriverData.zwaveParameters =[:]
 	if (!state.ZwaveClassVersions) state.ZwaveClassVersions = [:]
+	if (!state.zwaveParameterData) state.zwaveParameterData = [:]
 
 	// pauseExecution(2000)
 
@@ -249,15 +257,18 @@ void initialize()
   The next functions were chained so they start from the version report handler -- for getDeviceDataFromDatabase() -- and then pollDevicesForCurrentValues() is started from getDeviceDataFromDatabase after the device data is received
   */
 	// getDeviceDataFromDatabase()
-	// pollDevicesForCurrentValues()
+
+	runIn(10,pollDevicesForCurrentValues)
 }
 
 void uninstall()
 {
     state.remove("parameterTool")
 	state.remove("universalDriverData")
-	state.remove("universalDriverState")
+	state.remove("centralSceneState")
 	state.remove("ZwaveClassVersions")
+	state.remove("zwaveParameterData")
+
 	state.remove("opensmarthouse")
 	device.removeDataValue("firmwareVersion")
 	device.removeDataValue("hardwareVersion")
@@ -301,10 +312,19 @@ void updated()
 			}
 			
 			if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${Pvalue.parameterData.lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(Pvalue.parameterData.lastRetrievedValue as Integer) != newValue}."
+			/*
 			if ((Pvalue.parameterData.lastRetrievedValue as Integer) != newValue )
 			{
 				setParameter(Pkey, Pvalue.parameterData.size, newValue ) 
 			}
+			*/
+			
+			if (state.zwaveParameterData[Pkey]?.lastRetrievedValue  != newValue) 
+			{
+				setParameter(Pkey, state.zwaveParameterData[Pkey].size, newValue ) 
+		
+			}
+			
 		}
 	} 
 }
@@ -315,10 +335,22 @@ void updated()
 
 void getParameterValue(parameterNumber)
 {
- 	if (logEnable) log.debug "Getting value of parameter ${parameterNumber}"
+ 	log.debug "Getting value of parameter ${parameterNumber}"
 
     List<hubitat.zwave.Command> cmds=[]	
 		cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber as Integer)))
+	if (cmds) sendToDevice(cmds)
+}
+
+void getAllParameterValues()
+{
+ 	log.debug "Getting value of parameter ${parameterNumber}"
+
+    List<hubitat.zwave.Command> cmds=[]	
+	state.zwaveParameterData.each{k, v ->
+		cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: k as Integer)))
+		cmds.add "delay 1000"
+		}
 	if (cmds) sendToDevice(cmds)
 }
 
@@ -342,53 +374,46 @@ void setParameter(parameterNumber, parameterSize, value){
 
 void pollDevicesForCurrentValues()
 { 	// On startup, poll all the devices for their initial values!
-	state.universalDriverData.zwaveParameters.each { k , v -> getParameterValue(k)  }
+	/*
+	Integer delay = 1
+	state.zwaveParameterData.each { k , v -> 
+		getParameterValue(k)
+	}
+	*/
+	getAllParameterValues()
 }
 
 void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) {
-	
-	if (logEnable) log.debug "Received configuration report for parameter ${cmd.parameterNumber} indicating parameter set to value: ${cmd.scaledConfigurationValue}. Full report contents are: ${cmd}."
-
-		String parameterName = "configParam${"${cmd.parameterNumber}".padLeft(3, "0")}"
-		def currentValue = settings[parameterName]
-		def reportedValue  = cmd.scaledConfigurationValue
-		
-		// Sometimes the www.opemsmarthouse.org database has the wrong parameter sizes. Following code tries to correct that!
-		Integer storedSize = state.universalDriverData.zwaveParameters["${cmd.parameterNumber}"].parameterData.size
-		if (cmd.size != storedSize)
-		{
-			log.warn "Configuration report V2 returned from device for parameter ${cmd.parameterNumber} indicates a size of ${cmd.size}, while the database from www.opensmarthouse.org gave a size of ${storedSize}. Please report to developer! Making correction to local database. Please try your parameter setting again."
-			state.universalDriverData.zwaveParameters["${cmd.parameterNumber}"].input.put("parameterSize", cmd.size)
-		}
-		
-		if (currentValue != reportedValue)
-		{
-			settings[parameterName] = reportedValue
-		}
-		state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].parameterData.lastRetrievedValue = cmd.scaledConfigurationValue
+		processReceivedParameterData(cmd)
 }
 
-// This is the exact same code as the preceding, with a v1 as the signature!
 void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) {
-	
-	if (logEnable) log.debug "Received configuration report for parameter ${cmd.parameterNumber} indicating parameter set to value: ${cmd.scaledConfigurationValue}. Full report contents are: ${cmd}."
+		processReceivedParameterData(cmd)
+}
+
+void processReceivedParameterData(cmd)
+{
+	log.debug "Received configuration report for parameter ${cmd.parameterNumber} indicating parameter set to value: ${cmd.scaledConfigurationValue}. Full report contents are: ${cmd}."
 
 		String parameterName = "configParam${"${cmd.parameterNumber}".padLeft(3, "0")}"
 		def currentValue = settings[parameterName]
 		def reportedValue  = cmd.scaledConfigurationValue
 		
 		// Sometimes the 	www.opemsmarthouse.org database has the wrong parameter sizes. This tries to correct that!
-		if (cmd.size != state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].parameterData.size)
+		if ((!state.zwaveParameterData[(cmd.parameterNumber)].is(null) )  && (cmd.size != state.zwaveParameterData[(cmd.parameterNumber)].size))
 		{
-			log.warn "Configuration report V1 returned from device for parameter ${cmd.parameterNumber} indicates a size of ${cmd.size}, while the database from www.opensmarthouse.org gave a size of ${state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].parameterData.size}. Please report to developer! Making correction to local database. Please try your parameter setting again."
-			state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].parameterData.size = cmd.size
+			log.warn "Configuration report V1 returned from device for parameter ${cmd.parameterNumber} indicates a size of ${cmd.size}, while the database from www.opensmarthouse.org gave a size of ${state.zwaveParameterData["$cmd.parameterNumber"].size}. Please report to developer! Making correction to local database. Please try your parameter setting again."
+			state.zwaveParameterData.put(cmd.parameterNumber, [size:cmd.size])
 		}
 		
 		if (currentValue != reportedValue)
 		{
 			settings[parameterName] = reportedValue
 		}
-		state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].parameterData.lastRetrievedValue = cmd.scaledConfigurationValue
+		// state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].parameterData.lastRetrievedValue = cmd.scaledConfigurationValue
+		state.zwaveParameterData.put(cmd.parameterNumber, [lastRetrievedValue:cmd.scaledConfigurationValue])
+		state.zwaveParameterData.put(cmd.parameterNumber, [lastRetrievedValue:cmd.scaledConfigurationValue])
+
 }
 //////////////////////////////////////////////////////////////////////
 //////                  Handle Supervision request            ///////
@@ -630,7 +655,7 @@ void forceReleaseMessage(button)
 	// only need to force a release hold if the button state is "held" when the timer expires
     log.warn "Central Scene Release message for button ${button} not received before timeout - Faking a release message!"
     sendEvent(name:"released", value:button , type:"digital", isStateChange:true, descriptionText:"${device.displayName} button ${button} forced release")
-	state.universalDriverState.buttons.put(button, "released")
+	state.centralSceneState.buttons.put(button, "released")
 }
 
 void forceReleaseHold01(){ forceReleaseMessage(1)}
@@ -714,8 +739,8 @@ void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneNotification c
 }
 
 void ProcessCCReport(cmd) {
-if (! state.universalDriverState) { state.universalDriverState = [:] }
-if (! state.universalDriverState.buttons) { state.universalDriverState.buttons = [:] }
+if (! state.centralSceneState) { state.centralSceneState = [:] }
+if (! state.centralSceneState.buttons) { state.centralSceneState.buttons = [:] }
 
     Map event = [type:"physical", isStateChange:true]
 	if(logEnable) log.debug "Received Central Scene Notification ${cmd}"
@@ -724,7 +749,7 @@ if (! state.universalDriverState.buttons) { state.universalDriverState.buttons =
 	
 	if(logEnable) log.debug "Mapping of key attributes to Taps: ${taps}"
 	
-		if (state.universalDriverState.buttons.get(cmd.sceneNumber) == "held")
+		if (state.centralSceneState.buttons.get(cmd.sceneNumber) == "held")
 		{
 			// if currently holding, and receive anything except another hold or a release, 
 			// then cancel any outstanding lost "release" message timer ...
@@ -748,7 +773,7 @@ if (! state.universalDriverState.buttons) { state.universalDriverState.buttons =
 				event.value = cmd.sceneNumber
 				event.descriptionText="${device.displayName} button ${event.value} released"
 				if (txtEnable) log.info event.descriptionText
-				state.universalDriverState.buttons.put(cmd.sceneNumber, event.name)
+				state.centralSceneState.buttons.put(cmd.sceneNumber, event.name)
 
 				sendEvent(event)
 				break
@@ -757,7 +782,7 @@ if (! state.universalDriverState.buttons) { state.universalDriverState.buttons =
 				event.name = "held" 
 				event.value = cmd.sceneNumber
 
-				if (state.universalDriverState.buttons.get(cmd.sceneNumber) == "held")
+				if (state.centralSceneState.buttons.get(cmd.sceneNumber) == "held")
 				{
 					// If currently holding and receive a refresh, don't send another hold message
 					// Just report that still holding
@@ -769,7 +794,7 @@ if (! state.universalDriverState.buttons) { state.universalDriverState.buttons =
 				{
 					event.descriptionText="${device.displayName} button ${event.value} held"
 					if (txtEnable) log.info event.descriptionText
-					state.universalDriverState.buttons.put(cmd.sceneNumber, event.name)
+					state.centralSceneState.buttons.put(cmd.sceneNumber, event.name)
 					sendEvent(event)
 				}
 				
@@ -783,7 +808,7 @@ if (! state.universalDriverState.buttons) { state.universalDriverState.buttons =
 				event.value= cmd.sceneNumber
 				event.descriptionText="${device.displayName} button ${event.value} pushed"
 				if (txtEnable) log.info event.descriptionText
-				state.universalDriverState.buttons.put(cmd.sceneNumber, event.name)
+				state.centralSceneState.buttons.put(cmd.sceneNumber, event.name)
 				sendEvent(event)
 				break				
 	 
@@ -792,7 +817,7 @@ if (! state.universalDriverState.buttons) { state.universalDriverState.buttons =
 				event.value=cmd.sceneNumber
 				event.descriptionText="${device.displayName} button ${cmd.sceneNumber} doubleTapped"
 				if (txtEnable) log.info event.descriptionText
-				state.universalDriverState.buttons.put(cmd.sceneNumber, event.name)
+				state.centralSceneState.buttons.put(cmd.sceneNumber, event.name)
 				sendEvent(event)			
 				break
 			
