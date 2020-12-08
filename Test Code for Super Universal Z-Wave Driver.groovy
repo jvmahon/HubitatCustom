@@ -138,6 +138,10 @@ void getDeviceDataFromDatabase()
 	state.universalDriverData.zwaveParameters = createInputControls(allParameterData)
 	
     if (logEnable) log.debug newData
+	
+	/** pollDevicesForCurrentValues starts here instead of in initialize() to ensure the state has been updated -- concern is a Hubitat state saving race condition described here: https://community.hubitat.com/t/2-2-4-156-bug-setting-state-variable-race-condition-c7/57893/16
+	*/
+	pollDevicesForCurrentValues()
 }
 
 Map createInputControls(data)
@@ -213,13 +217,7 @@ void installed()
     if (!state.universalDriverData.zwaveParameters) state.universalDriverData.zwaveParameters =[:]
 	if (!state.ZwaveClassVersions) state.ZwaveClassVersions = [:]
 
-    getFirmwareVersionFromDevice() // sets the firmware version in state.firmware[main: ??,sub: ??]
-
-    getDeviceDataFromDatabase()
-	
-	getZwaveClassVersions()
-		
-	pollDevicesForCurrentValues()
+	initialize()
 }
 
 void configure()
@@ -238,13 +236,20 @@ void initialize()
     if (!state.universalDriverData.zwaveParameters) state.universalDriverData.zwaveParameters =[:]
 	if (!state.ZwaveClassVersions) state.ZwaveClassVersions = [:]
 
-    getFirmwareVersionFromDevice() // sets the firmware version in state.firmware[main: ??,sub: ??]
-	pauseExecution(2000)
+	// pauseExecution(2000)
+
   	getZwaveClassVersions()
+	/** The returned command classes are used in zwave.parse, so wait a bit for them to be processed before the next step.
+	*/
+	runIn(5, getFirmwareVersionFromDevice) // sets the firmware version in state.firmware[main: ??,sub: ??]
+
   
-	getDeviceDataFromDatabase()
-	
-	pollDevicesForCurrentValues()
+  /**
+  Because of bug in saving state data described here: https://community.hubitat.com/t/2-2-4-156-bug-setting-state-variable-race-condition-c7/57893/16
+  The next functions were chained so they start from the version report handler -- for getDeviceDataFromDatabase() -- and then pollDevicesForCurrentValues() is started from getDeviceDataFromDatabase after the device data is received
+  */
+	// getDeviceDataFromDatabase()
+	// pollDevicesForCurrentValues()
 }
 
 void uninstall()
@@ -425,6 +430,7 @@ void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
 	if (! state.firmware) state.firmware = [:]
 	state.put("firmware", [main: cmd.applicationVersion, sub: cmd.applicationSubVersion])
 	log.info "Firmware version is: ${state.get("firmware")}"
+	getDeviceDataFromDatabase()
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {
@@ -432,6 +438,7 @@ void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {
 	if (! state.firmware) state.firmware = [:]
 	state.put("firmware", [main: cmd.firmware0Version, sub: cmd.firmware0SubVersion])
 	log.info "Firmware version is: ${state.get("firmware")}"
+	getDeviceDataFromDatabase()
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
@@ -439,6 +446,7 @@ void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
 	if (! state.firmware) state.firmware = [:]
 	state.put("firmware", [main: cmd.firmware0Version, sub: cmd.firmware0SubVersion])
 	log.info "Firmware version is: ${state.get("firmware")}"
+	getDeviceDataFromDatabase()
 }
 
 //////////////////////////////////////////////////////////////////////
