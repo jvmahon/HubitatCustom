@@ -63,7 +63,7 @@ metadata {
 			input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false
 			input name: "txtEnable", type: "bool", title: "Enable text logging", defaultValue: true
 			input name: "confirmSend", type: "bool", title: "Always confirm new value after sending to device (reduces performance)", defaultValue: false
-			state.universalDriverData?.zwaveParameters?.each { input it.value.input }
+			state.parameterInputs?.each { input it.value.input }
         }
     }
 }
@@ -79,7 +79,7 @@ should be called AFTER retrieving the device's firmware version using getFirmwar
 */
 void getDeviceDataFromDatabase()
 {
-	if( state.universalDriverData?.zwaveParameters)
+	if( state.parameterInputs)
 	{
 		log.debug "Already have parameter data. No need to retrieving again!"
 		return
@@ -135,11 +135,19 @@ void getDeviceDataFromDatabase()
             // if (logEnable) log.debug "Parameter Data in Response: ${allParameterData}"
         }
 
+	Map parameterSizes = [:]
 	allParameterData.each
 	{
-		state.zwaveParameterData.put(it.param_id, [size:it.size])
+		parameterSizes.put(it.param_id, [size:it.size])
 	}
-	state.universalDriverData.zwaveParameters = createInputControls(allParameterData)
+	
+	state.put("zwaveParameterData", parameterSizes)
+	
+	log.debug "Test 1 - state.waveParameterData is: ${state.zwaveParameterData}"
+	
+	state.parameterInputs = createInputControls(allParameterData)
+	log.debug "Test 2 - State is now ${state}"
+	
 	
     if (logEnable) log.debug newData
 	
@@ -220,7 +228,7 @@ void refresh() {
 void installed()
 {
     if (!state.universalDriverData)  state.universalDriverData = [:] 
-    if (!state.universalDriverData.zwaveParameters) state.universalDriverData.zwaveParameters =[:]
+    if (!state.parameterInputs) 	state.parameterInputs = [:]
 	if (!state.ZwaveClassVersions) state.ZwaveClassVersions = [:]
 	if (!state.zwaveParameterData) state.zwaveParameterData = [:]
 
@@ -240,7 +248,7 @@ void EraseState()
 void initialize()
 {
     if (!state.universalDriverData)  state.universalDriverData = [:] 
-    if (!state.universalDriverData.zwaveParameters) state.universalDriverData.zwaveParameters =[:]
+    if (!state.parameterInputs) state.parameterInputs =[:]
 	if (!state.ZwaveClassVersions) state.ZwaveClassVersions = [:]
 	if (!state.zwaveParameterData) state.zwaveParameterData = [:]
 
@@ -289,13 +297,13 @@ void updated()
 	if (logEnable) runIn(1800,logsOff)
 
 	/*
-	state.universalDriverData.zwaveParameters is arranged in key : value pairs.
+	state.parameterInputs is arranged in key : value pairs.
 	key is the parameter #
 	value is a map of "input" controls, which is arranged under the sub-key "input"
 	so values are accessed as v.[input:[defaultValue:0, name:configParam004, options:[0:Normal, 1:Inverted], description:Controls the on/off orientation of the rocker switch, title:(4) Orientation, type:enum]]
 	*/
 	def integerSettings = [:]
-	state.universalDriverData?.zwaveParameters.each { Pkey , Pvalue -> 
+	state.parameterInputs?.each { Pkey , Pvalue -> 
 		
 		if( settings.containsKey(Pvalue.input.name))
 		{
@@ -344,10 +352,11 @@ void getParameterValue(parameterNumber)
 
 void getAllParameterValues()
 {
- 	log.debug "Getting value of parameter ${parameterNumber}"
+
 
     List<hubitat.zwave.Command> cmds=[]	
 	state.zwaveParameterData.each{k, v ->
+	 	log.debug "Getting value of parameter ${k}"
 		cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: k as Integer)))
 		cmds.add "delay 1000"
 		}
@@ -410,9 +419,9 @@ void processReceivedParameterData(cmd)
 		{
 			settings[parameterName] = reportedValue
 		}
-		// state.universalDriverData.zwaveParameters["$cmd.parameterNumber"].parameterData.lastRetrievedValue = cmd.scaledConfigurationValue
-		state.zwaveParameterData.put(cmd.parameterNumber, [lastRetrievedValue:cmd.scaledConfigurationValue])
-		state.zwaveParameterData.put(cmd.parameterNumber, [lastRetrievedValue:cmd.scaledConfigurationValue])
+
+    log.debug "state.zwaveParameterData is: ${state.zwaveParameterData}, and state.zwaveParameterData[(cmd.parameterNumber)] is ${state.zwaveParameterData["${cmd.parameterNumber}"]}"
+		state.zwaveParameterData["${cmd.parameterNumber}"].put("lastRetrievedValue", (cmd.scaledConfigurationValue))
 
 }
 //////////////////////////////////////////////////////////////////////
