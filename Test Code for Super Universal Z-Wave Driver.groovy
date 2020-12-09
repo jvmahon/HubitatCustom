@@ -4,12 +4,15 @@ Operation Sequence ...
 1. Get the device's firmware using: getFirmwareVersionFromDevice(), store it in state.firmware.[main: ##, sub: ##]
 2. Get the device's database record using: getDeviceDataFromDatabase
 
-
 */
-if ( ! state.universalDriverData) { state.universalDriverData = [:] }
+if ( ! state.driverData) { state.driverData = [:] }
 
 metadata {
-        definition (name: "Testing Super Universal Zwave Plus Dimmer",namespace: "jvm", author: "jvm") {
+	definition (name: "Testing Super Universal Zwave Plus Dimmer",namespace: "jvm", author: "jvm") {
+		capability "Initialize"
+		capability "Configuration"
+		capability "Refresh"
+		
  		// Pick one of the following 5 Capabilities. Comment out the remainder.
 			// capability "Bulb"
 			// capability "Light"
@@ -21,32 +24,26 @@ metadata {
 			capability "SwitchLevel"
 			capability "ChangeLevel"
 		
-		capability "Initialize"
-		capability "Configuration"
-		capability "Refresh"
-		
 		// Central Scene functions. Include the "commands" if you want to generate central scene actions from the web interface. If they are not included, central scene will still be generated from the device.
 			capability "PushableButton"
-				command "push", ["NUMBER"]	
-				
+			command "push", ["NUMBER"]	
 			capability "HoldableButton"
-				command "hold", ["NUMBER"]
-				
+			command "hold", ["NUMBER"]
 			capability "ReleasableButton"
-				command "release", ["NUMBER"]
-				
+			command "release", ["NUMBER"]
 			capability "DoubleTapableButton"
-					command "doubleTap", ["NUMBER"]
+			command "doubleTap", ["NUMBER"]
 			
         // The following is for debugging. In final code, it can be removed!
-    	command "getDeviceDataFromDatabase"
+    	// command "getDeviceDataFromDatabase"
 		
-		// All data used by this driver is stored as a Map (more particulaly, as a Map of Maps) 
-		// in the state variable "state.universalDriverData". The "uninstall" command deletes that key
-		// to clean up the data before the user changest back to the retular driver
-        command "uninstall"
-		command "EraseState"
-		// A generalized function for setting parameters.	
+		/** The "ResetDriverStateData" command deletes all state data stored by the driver. 
+		*/
+		command "ResetDriverStateData"
+		
+		/**
+			setParameter is a generalized function for setting parameters.	
+		*/
 			command "setParameter",[[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],
 					[name:"size",type:"NUMBER", description:"Parameter Size", constraints:["NUMBER"]],
 					[name:"value",type:"NUMBER", description:"Parameter Value", constraints:["NUMBER"]]
@@ -81,7 +78,7 @@ void getDeviceDataFromDatabase()
 {
 	if( state.parameterInputs)
 	{
-		log.debug "Already have parameter data. No need to retrieving again!"
+		if (logEnable) log.debug "Already have parameter data. No need to retrieving again!"
 		return
 	}
 
@@ -103,7 +100,7 @@ void getDeviceDataFromDatabase()
         if(logEnable) log.debug "Response Data class: ${resp.data instanceof Map}"
 
 
-                log.info "Response data size is ${resp.data.devices.size()}"
+                if(logEnable) log.debug "Response data size is ${resp.data.devices.size()}"
 			    mydevice = resp.data.devices.find { element ->
 		 
 				    Minimum_Version = element.version_min.split("\\.")
@@ -130,9 +127,8 @@ void getDeviceDataFromDatabase()
     
 	httpGet([uri:queryByDatabaseID])
         { resp->
-			log.info "Retrieved data for device model: ${resp.data?.label}, Manufacturer: ${resp.data?.manufacturer?.label}"
+			if(logEnable) log.debug "Retrieved data for device model: ${resp.data?.label}, Manufacturer: ${resp.data?.manufacturer?.label}"
             allParameterData = resp.data.parameters
-            // if (logEnable) log.debug "Parameter Data in Response: ${allParameterData}"
         }
 
 	Map parameterSizes = [:]
@@ -140,27 +136,21 @@ void getDeviceDataFromDatabase()
 	{
 		parameterSizes.put(it.param_id, [size:it.size])
 	}
-	
 	state.put("zwaveParameterData", parameterSizes)
-	
-	log.debug "Test 1 - state.waveParameterData is: ${state.zwaveParameterData}"
-	
+		
 	state.parameterInputs = createInputControls(allParameterData)
-	log.debug "Test 2 - State is now ${state}"
-	
 	
     if (logEnable) log.debug newData
 	
 	/** pollDevicesForCurrentValues starts here instead of in initialize() to ensure the state has been updated -- concern is a Hubitat state saving race condition described here: https://community.hubitat.com/t/2-2-4-156-bug-setting-state-variable-race-condition-c7/57893/16
 	*/
-
 }
 
 Map createInputControls(data)
 {
 	Map inputControls = [:]
 
-	log.debug "Creating Input Controls"
+	if (logEnable) log.debug "Creating Input Controls"
 	
 	data.each
 	{
@@ -180,7 +170,7 @@ Map createInputControls(data)
                 Map Options = inputControls[it.param_id].input.options
                 Options.put(it.bitmask.toInteger(), "${it.label} - ${it.options[1].label}")
                 Options = Options.sort()
-                log.debug "Sorted bitmap Options: ${Options}"
+                if (logEnable) log.debug "Sorted bitmap Options: ${Options}"
              
                 inputControls[it.param_id].input.options = Options
 			}
@@ -227,7 +217,7 @@ void refresh() {
 
 void installed()
 {
-    if (!state.universalDriverData)  state.universalDriverData = [:] 
+    if (!state.driverData)  state.driverData = [:] 
     if (!state.parameterInputs) 	state.parameterInputs = [:]
 	if (!state.ZwaveClassVersions) state.ZwaveClassVersions = [:]
 	if (!state.zwaveParameterData) state.zwaveParameterData = [:]
@@ -240,25 +230,22 @@ void configure()
 	initialize()
 }
 
-void EraseState()
+void ResetDriverStateData()
 {
 	state.clear()
 }
 
 void initialize()
 {
-    if (!state.universalDriverData)  state.universalDriverData = [:] 
+    if (!state.driverData)  state.driverData = [:] 
     if (!state.parameterInputs) state.parameterInputs =[:]
 	if (!state.ZwaveClassVersions) state.ZwaveClassVersions = [:]
 	if (!state.zwaveParameterData) state.zwaveParameterData = [:]
-
-	// pauseExecution(2000)
 
   	getZwaveClassVersions()
 	/** The returned command classes are used in zwave.parse, so wait a bit for them to be processed before the next step.
 	*/
 	runIn(5, getFirmwareVersionFromDevice) // sets the firmware version in state.firmware[main: ??,sub: ??]
-
   
   /**
   Because of bug in saving state data described here: https://community.hubitat.com/t/2-2-4-156-bug-setting-state-variable-race-condition-c7/57893/16
@@ -269,10 +256,12 @@ void initialize()
 	runIn(10,pollDevicesForCurrentValues)
 }
 
-void uninstall()
+/** Miscellaneous state and device data cleanup tool used during debugging and development
+*/
+void cleanup()
 {
     state.remove("parameterTool")
-	state.remove("universalDriverData")
+	state.remove("driverData")
 	state.remove("centralSceneState")
 	state.remove("ZwaveClassVersions")
 	state.remove("zwaveParameterData")
@@ -283,7 +272,6 @@ void uninstall()
 	device.removeDataValue("protocolVersion")
 	device.removeDataValue("zwaveAssociationG1")
     device.removeDataValue("zwNodeInfo")
-
 }
 
 void logsOff(){
@@ -293,7 +281,7 @@ void logsOff(){
 
 void updated()
 {
-	if (logEnable) log.debug "Updated function called"
+	if (txtEnable) log.info "Updating changed parameters . . ."
 	if (logEnable) runIn(1800,logsOff)
 
 	/*
@@ -320,19 +308,12 @@ void updated()
 			}
 			
 			if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${Pvalue.parameterData.lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(Pvalue.parameterData.lastRetrievedValue as Integer) != newValue}."
-			/*
-			if ((Pvalue.parameterData.lastRetrievedValue as Integer) != newValue )
-			{
-				setParameter(Pkey, Pvalue.parameterData.size, newValue ) 
-			}
-			*/
 			
 			if (state.zwaveParameterData[Pkey]?.lastRetrievedValue  != newValue) 
 			{
+                if (txtEnable) log.info "Updating Zwave parameter ${Pkey} to new value ${newValue}"
 				setParameter(Pkey, state.zwaveParameterData[Pkey].size, newValue ) 
-		
 			}
-			
 		}
 	} 
 }
@@ -343,7 +324,7 @@ void updated()
 
 void getParameterValue(parameterNumber)
 {
- 	log.debug "Getting value of parameter ${parameterNumber}"
+ 	if (logEnable) log.debug "Getting value of parameter ${parameterNumber}"
 
     List<hubitat.zwave.Command> cmds=[]	
 		cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber as Integer)))
@@ -352,11 +333,9 @@ void getParameterValue(parameterNumber)
 
 void getAllParameterValues()
 {
-
-
     List<hubitat.zwave.Command> cmds=[]	
 	state.zwaveParameterData.each{k, v ->
-	 	log.debug "Getting value of parameter ${k}"
+	 	if (logEnable) log.debug "Getting value of parameter ${k}"
 		cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: k as Integer)))
 		cmds.add "delay 1000"
 		}
@@ -383,12 +362,6 @@ void setParameter(parameterNumber, parameterSize, value){
 
 void pollDevicesForCurrentValues()
 { 	// On startup, poll all the devices for their initial values!
-	/*
-	Integer delay = 1
-	state.zwaveParameterData.each { k , v -> 
-		getParameterValue(k)
-	}
-	*/
 	getAllParameterValues()
 }
 
@@ -402,7 +375,7 @@ void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
 
 void processReceivedParameterData(cmd)
 {
-	log.debug "Received configuration report for parameter ${cmd.parameterNumber} indicating parameter set to value: ${cmd.scaledConfigurationValue}. Full report contents are: ${cmd}."
+	if (logEnable) log.debug "Received configuration report for parameter ${cmd.parameterNumber} indicating parameter set to value: ${cmd.scaledConfigurationValue}. Full report contents are: ${cmd}."
 
 		String parameterName = "configParam${"${cmd.parameterNumber}".padLeft(3, "0")}"
 		def currentValue = settings[parameterName]
@@ -420,10 +393,10 @@ void processReceivedParameterData(cmd)
 			settings[parameterName] = reportedValue
 		}
 
-    log.debug "state.zwaveParameterData is: ${state.zwaveParameterData}, and state.zwaveParameterData[(cmd.parameterNumber)] is ${state.zwaveParameterData["${cmd.parameterNumber}"]}"
+    if (logEnable) log.debug "state.zwaveParameterData is: ${state.zwaveParameterData}, and state.zwaveParameterData[(cmd.parameterNumber)] is ${state.zwaveParameterData["${cmd.parameterNumber}"]}"
 		state.zwaveParameterData["${cmd.parameterNumber}"].put("lastRetrievedValue", (cmd.scaledConfigurationValue))
-
 }
+
 //////////////////////////////////////////////////////////////////////
 //////                  Handle Supervision request            ///////
 ////////////////////////////////////////////////////////////////////// 
@@ -460,26 +433,26 @@ void getFirmwareVersionFromDevice()
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
-    log.debug "For ${device.displayName}, Received V1 version report: ${cmd}"
+    if (logEnable) log.debug "For ${device.displayName}, Received V1 version report: ${cmd}"
 	if (! state.firmware) state.firmware = [:]
 	state.put("firmware", [main: cmd.applicationVersion, sub: cmd.applicationSubVersion])
-	log.info "Firmware version is: ${state.get("firmware")}"
+	if (txtEnable) log.info "Firmware version for device ${device.displayName} is: ${state.get("firmware")}"
 	getDeviceDataFromDatabase()
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {
-    log.debug "For ${device.displayName}, Received V2 version report: ${cmd}"
+    if (logEnable) log.debug "For ${device.displayName}, Received V2 version report: ${cmd}"
 	if (! state.firmware) state.firmware = [:]
 	state.put("firmware", [main: cmd.firmware0Version, sub: cmd.firmware0SubVersion])
-	log.info "Firmware version is: ${state.get("firmware")}"
+	if (txtEnable) log.info "Firmware version for device ${device.displayName} is: ${state.get("firmware")}"
 	getDeviceDataFromDatabase()
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
-    log.debug "For ${device.displayName}, Received V3 version report: ${cmd}"
+    if (logEnable) log.debug "For ${device.displayName}, Received V3 version report: ${cmd}"
 	if (! state.firmware) state.firmware = [:]
 	state.put("firmware", [main: cmd.firmware0Version, sub: cmd.firmware0SubVersion])
-	log.info "Firmware version is: ${state.get("firmware")}"
+	if (txtEnable) log.info "Firmware version for device ${device.displayName} is: ${state.get("firmware")}"
 	getDeviceDataFromDatabase()
 }
 
@@ -869,16 +842,16 @@ void zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd) {
 	{
 		eventProcess(	name: "switch", value: (cmd.value ? "on" : "off"), 
 						descriptionText: "Device ${device.displayName} set to ${value}.", 
-						type: (state.universalDriverData.get("isDigital") as Boolean ) ? "digital" : "physical" )
+						type: (state.driverData.get("isDigital") as Boolean ) ? "digital" : "physical" )
 	}
 
     if ((device.hasAttribute("level")  || device.hasCapability("SwitchLevel") ) && (cmd.value != 0))
 	{
 		eventProcess( 	name: "level", value: cmd.value, 
 						descriptionText: "Device ${device.displayName} level set to ${value}%", 
-						type: (state.universalDriverData.get("isDigital") as Boolean ) ? "digital" : "physical" )
+						type: (state.driverData.get("isDigital") as Boolean ) ? "digital" : "physical" )
 	}
-	state.universalDriverData.put("isDigital", false)
+	state.driverData.put("isDigital", false)
 }
 
 void zwaveEvent(hubitat.zwave.commands.basicv2.BasicReport cmd) {
@@ -889,16 +862,16 @@ void zwaveEvent(hubitat.zwave.commands.basicv2.BasicReport cmd) {
 	{
 		eventProcess(	name: "switch", value: (cmd.targetValue ? "on" : "off"), 
 						descriptionText: "Device ${device.displayName} set to ${value}.", 
-						type: (state.universalDriverData.get("isDigital") as Boolean ) ? "digital" : "physical" )
+						type: (state.driverData.get("isDigital") as Boolean ) ? "digital" : "physical" )
 	}
 
     if ((device.hasAttribute("level")  || device.hasCapability("SwitchLevel") ) && (cmd.targetValue != 0))
 	{
 		eventProcess( 	name: "level", value: cmd.targetValue, 
 						descriptionText: "Device ${device.displayName} level set to ${value}%", 
-						type: (state.universalDriverData.get("isDigital") as Boolean ) ? "digital" : "physical" )
+						type: (state.driverData.get("isDigital") as Boolean ) ? "digital" : "physical" )
 	}
-	state.universalDriverData.put("isDigital", false)
+	state.driverData.put("isDigital", false)
 }
 
 //returns on physical v1
@@ -930,7 +903,7 @@ void processMultilevelReport(cmd)
 		eventProcess( 	name: "level", value: (cmd.value == 99) ? 100: cmd.value, 
 						descriptionText: "Device ${device.displayName} level set to ${cmd.value}%", type: "physical" )
 	}
-	state.universalDriverData.put("isDigital", false)
+	state.driverData.put("isDigital", false)
 }
 
 void eventProcess(Map event) {
@@ -955,7 +928,7 @@ void on() {
 	
 	if (confirmSend ) 
 	{
-	state.universalDriverData.put("isDigital", true)
+		state.driverData.put("isDigital", true)
 		sendToDevice (secure(zwave.basicV1.basicGet()))
 	} else {
 		sendEvent(name: "switch", value: "on", descriptionText: "Device ${device.displayName} turned on", 
@@ -969,7 +942,7 @@ void off() {
 	sendToDevice (secure(zwave.basicV1.basicSet(value: 0 )))
 	if (confirmSend ) 
 	{
-	state.universalDriverData.put("isDigital", true)
+		state.driverData.put("isDigital", true)
 		sendToDevice (secure(zwave.basicV1.basicGet()))
 	} else {
 		sendEvent(name: "switch", value: "off", descriptionText: "Device ${device.displayName} turned off", 
@@ -979,7 +952,7 @@ void off() {
 
 void setLevel(level, duration = 0)
 {
-	state.universalDriverData.put("isDigital", true)
+	state.driverData.put("isDigital", true)
 	if (logEnable) log.debug "Executing function setlevel(level, duration)."
 	if ( level < 0  ) level = 0
 	if ( level > 99 ) level = 99
