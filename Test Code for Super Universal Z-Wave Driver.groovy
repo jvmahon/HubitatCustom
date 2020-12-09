@@ -5,12 +5,12 @@ Operation Sequence ...
 2. Get the device's database record using: getDeviceDataFromDatabase
 
 */
-if ( ! state.driverData) { state.driverData = [:] }
+if (state.driverData.is(null)) { state.driverData = [:] }
 
 metadata {
 	definition (name: "Testing Super Universal Zwave Plus Dimmer",namespace: "jvm", author: "jvm") {
 		capability "Initialize"
-		capability "Configuration"
+		// capability "Configuration" // Does the same as Initialize, so don't show the separate control!
 		capability "Refresh"
 		
  		// Pick one of the following 5 Capabilities. Comment out the remainder.
@@ -217,10 +217,10 @@ void refresh() {
 
 void installed()
 {
-    if (!state.driverData)  state.driverData = [:] 
-    if (!state.parameterInputs) 	state.parameterInputs = [:]
-	if (!state.ZwaveClassVersions) state.ZwaveClassVersions = [:]
-	if (!state.zwaveParameterData) state.zwaveParameterData = [:]
+    if (state.driverData.is(null) )  state.driverData = [:] 
+    if (state.parameterInputs.is(null)) state.parameterInputs =[:]
+	if (state.ZwaveClassVersions.is(null)) state.ZwaveClassVersions = [:]
+	if (state.zwaveParameterData.is(null)) state.zwaveParameterData = [:]
 
 	initialize()
 }
@@ -237,10 +237,10 @@ void ResetDriverStateData()
 
 void initialize()
 {
-    if (!state.driverData)  state.driverData = [:] 
-    if (!state.parameterInputs) state.parameterInputs =[:]
-	if (!state.ZwaveClassVersions) state.ZwaveClassVersions = [:]
-	if (!state.zwaveParameterData) state.zwaveParameterData = [:]
+    if (state.driverData.is(null) )  state.driverData = [:] 
+    if (state.parameterInputs.is(null)) state.parameterInputs =[:]
+	if (state.ZwaveClassVersions.is(null)) state.ZwaveClassVersions = [:]
+	if (state.zwaveParameterData.is(null)) state.zwaveParameterData = [:]
 
   	getZwaveClassVersions()
 	/** The returned command classes are used in zwave.parse, so wait a bit for them to be processed before the next step.
@@ -307,7 +307,7 @@ void updated()
 				newValue = settings[Pvalue.input.name] as Integer  
 			}
 			
-			if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${Pvalue.parameterData.lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(Pvalue.parameterData.lastRetrievedValue as Integer) != newValue}."
+			if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${state.zwaveParameterData[Pkey].lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(state.zwaveParameterData[Pkey].lastRetrievedValue as Integer) != newValue}."
 			
 			if (state.zwaveParameterData[Pkey]?.lastRetrievedValue  != newValue) 
 			{
@@ -337,7 +337,7 @@ void getAllParameterValues()
 	state.zwaveParameterData.each{k, v ->
 	 	if (logEnable) log.debug "Getting value of parameter ${k}"
 		cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: k as Integer)))
-		cmds.add "delay 1000"
+		cmds.add "delay 250"
 		}
 	if (cmds) sendToDevice(cmds)
 }
@@ -434,7 +434,7 @@ void getFirmwareVersionFromDevice()
 
 void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
     if (logEnable) log.debug "For ${device.displayName}, Received V1 version report: ${cmd}"
-	if (! state.firmware) state.firmware = [:]
+	if (state.firmware.is(null)) state.firmware = [:]
 	state.put("firmware", [main: cmd.applicationVersion, sub: cmd.applicationSubVersion])
 	if (txtEnable) log.info "Firmware version for device ${device.displayName} is: ${state.get("firmware")}"
 	getDeviceDataFromDatabase()
@@ -442,7 +442,7 @@ void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
 
 void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {
     if (logEnable) log.debug "For ${device.displayName}, Received V2 version report: ${cmd}"
-	if (! state.firmware) state.firmware = [:]
+	if (state.firmware.is(null)) state.firmware = [:]
 	state.put("firmware", [main: cmd.firmware0Version, sub: cmd.firmware0SubVersion])
 	if (txtEnable) log.info "Firmware version for device ${device.displayName} is: ${state.get("firmware")}"
 	getDeviceDataFromDatabase()
@@ -450,7 +450,7 @@ void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {
 
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
     if (logEnable) log.debug "For ${device.displayName}, Received V3 version report: ${cmd}"
-	if (! state.firmware) state.firmware = [:]
+	if (state.firmware.is(null)) state.firmware = [:]
 	state.put("firmware", [main: cmd.firmware0Version, sub: cmd.firmware0SubVersion])
 	if (txtEnable) log.info "Firmware version for device ${device.displayName} is: ${state.get("firmware")}"
 	getDeviceDataFromDatabase()
@@ -721,8 +721,8 @@ void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneNotification c
 }
 
 void ProcessCCReport(cmd) {
-if (! state.centralSceneState) { state.centralSceneState = [:] }
-if (! state.centralSceneState.buttons) { state.centralSceneState.buttons = [:] }
+if (state.centralSceneState.is(null)) { state.centralSceneState = [:] }
+if (state.centralSceneState.buttons.is(null)) { state.centralSceneState.buttons = [:] }
 
     Map event = [type:"physical", isStateChange:true]
 	if(logEnable) log.debug "Received Central Scene Notification ${cmd}"
