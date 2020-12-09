@@ -14,3 +14,7 @@ Some tips:
 * Click on the "Initialize" control to pull the data from the database and to poll your device for its current parameter settings.
 * After this completes, then click on "Save Preferences" and the web page ill now refresh. After it refreshes, the "Preferences" area should now show controls for all of the parameters.  If everything worked right, the controls should show the current settings of your device
 * You should now be able to change / udpate the parameters.
+
+# Advanced Zwave Plus Switch driver - Work in Progress!
+
+The Advanced Zwave Plus Dimmer driver code was written to be usable for both switches and dimmers. The only real difference is which capabilities are left commented / uncommented.  I plan to add metering support making this "truly" universal, and will then release a switch version (as well as an updated dimmer version).
