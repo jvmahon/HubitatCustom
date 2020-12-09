@@ -1,5 +1,5 @@
 # HubitatCustom
-# Advanced Zwave Plus Dimmer driver - Alpha Releaset!
+# Advanced Zwave Plus Dimmer driver - Alpha Release!
 
 The file "Advanced Zwave Plus Dimmer Driver.groovy" is a dimmer driver file that can identify all the parameters for a device and provides input controls allowing the setting of each parameter.
 
