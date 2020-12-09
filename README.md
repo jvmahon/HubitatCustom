@@ -16,7 +16,7 @@ Some tips:
 * You should now be able to change / udpate the parameters.
 
 # Known Problems
-* Operation is a bit dicey when dealing with parameters that are expressed as bitmap fields!.  This is due to a bug in the Hubitat input control which I've reported to Hubitat. What happens is that the bitfield parameter input should allow you to click-select multiple inputs (i.e., to select multipe ones of the "bit" choices), but sometimes it only operates for single choice selectin
+* Operation is a bit dicey when dealing with parameters that are expressed as bitmap fields! (one example of this is the custom-status LED selections for a HomeSweer WD200).  This is due to a bug in the Hubitat input control which I've reported to Hubitat. What happens is that the bitfield parameter input should allow you to click-select multiple inputs (i.e., to select multipe ones of the "bit" choices), but sometimes it only operates for single choice selection. To "Fix" this, de-select everything in the bitfield control, "Save Preferences" then try again.
 
 # Advanced Zwave Plus Switch driver - Work in Progress!
 
