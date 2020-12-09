@@ -1,24 +1,16 @@
 # HubitatCustom
-# Super Parameter Setting Tool - Beta!
+# Advanced Zwave Plus Dimmer driver - Alpha Releaset!
 
-This is a parameter setting tool that uses the device's manufacturer, device type, and device ID information to retrieve parameter setting information from a database.
+The file "Advanced Zwave Plus Dimmer Driver.groovy" is a dimmer driver file that can identify all the parameters for a device and provides input controls allowing the setting of each parameter.
 
-#### This is still a work-in-progress. Estimate first release by Dec. 15, 2020. Work is still being done to handle bitmap parameters (so recommendation is that you don't fork this repository for your own use yet!)
+The way this works is that the driver queries the opensmarthouse.com database using the device's manufacturer, device type, and device ID information to retrieve a database record identifying all the parameters for the device. That information is then saved in the device's "state".
 
-#### Update: 2020.12.03 - Slight change in direction - I expect to consolidate the code for this parameter tool into a single "driver" codebase which, by commenting / uncommenting code sections, will be usable as a "generic" paramter setting tool, a dimmer driver, or a switch driver.
+#### This is still a work-in-progress. 
 
 Some tips:
-* Install the driver on the "Driver Code" page. It will appear with the name "Super Parameter Setting Tool"
-* Go to the device that you want to work on and select this tool as its driver.
+* Install the driver on the "Driver Code" page. It will appear with the name "Advanced Zwave Plus Dimmer
+* Go to the device that you want to work on and select this driver as the device's driver "Type".
+* Click on the "Reset Driver State Data" button to clear the stored "state" inforamtion from the prior driver.
 * Click on the "Initialize" control to pull the data from the database and to poll your device for its current parameter settings.
-* The "Preferences" area should now show controls for all of the parameters.  If everything worked right, the controls should show the current settings of your device
+* After this completes, then click on "Save Preferences" and the web page ill now refresh. After it refreshes, the "Preferences" area should now show controls for all of the parameters.  If everything worked right, the controls should show the current settings of your device
 * You should now be able to change / udpate the parameters.
-* Before switching back to your original driver, you can click on the "Uninstall" button to clean the State Variable data if you want to remove it.
-
-
-
-# Universal Z-Wave Driver 
-
-This is a device driver (dimmers & switches mostly) that will incoprorate the features of the Super Parameter Setting tool.
-
-This is still in "beta" and isn't ready for general use. I'll update this page with some more information once I get time to develope it further.
