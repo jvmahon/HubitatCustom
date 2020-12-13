@@ -52,6 +52,7 @@ metadata {
 		*/
 			command "setParameter",[
 					[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],
+					[name:"size",type:"NUMBER", description:"Parameter Size", constraints:["NUMBER"]],
 					[name:"value",type:"NUMBER", description:"Parameter Value", constraints:["NUMBER"]]
 					]		
 		
@@ -346,8 +347,8 @@ log.debug "Processing pending parameter changes. parameterData is: ${parameterDa
 	parameterData.each{ Pkey, parameterInfo ->
 		if (! parameterInfo.pendingChangeValue.is( null ) )
 		{
-			log.debug "Parameters for setParameter are: parameterNumber: ${Pkey as Short}, ${parameterInfo.pendingChangeValue as BigInteger}."
-			 setParameter((Pkey as Short), (parameterInfo.pendingChangeValue as BigInteger) ) 
+			log.debug "Parameters for setParameter are: parameterNumber: ${Pkey as Short}, size: ${parameterInfo.size as Short}, value: ${parameterInfo.pendingChangeValue as BigInteger}."
+			 setParameter((Pkey as Short), (parameterInfo.size as Short), (parameterInfo.pendingChangeValue as BigInteger) ) 
 		 }
 	}
 }
@@ -383,6 +384,7 @@ void getAllParameterValues()
 		}
 }
 
+/*
 void setParameter(Short parameterNumber, BigInteger value){
 	if (txtEnable) log.info "Setting parameter ${parameterNumber} to value ${value}."
     if (parameterNumber.is( null ) || value.is( null )) {
@@ -394,11 +396,28 @@ void setParameter(Short parameterNumber, BigInteger value){
 
 	// All versions of configurationSet work the same!
 	cmds.add(secure(zwave.configurationV2.configurationSet(scaledConfigurationValue: (value as BigInteger), parameterNumber: (parameterNumber as Short))))
+	
+	log.warn "Parameter setting commands are: " + cmds
 
 	cmds.add "delay 500"
 	cmds.add(secure(zwave.configurationV2.configurationGet(parameterNumber: parameterNumber as Integer)))
 	
 	if (cmds) sendToDevice(cmds)
+}
+*/
+
+void setParameter(Short parameterNumber = null, Short size = null, BigInteger value = null){
+	List<hubitat.zwave.Command> cmds=[]
+
+    if (parameterNumber == null || size == null || value == null) {
+		log.warn "Incomplete parameter list supplied... syntax: setParameter(parameterNumber,size,value)"
+    } else {
+	    cmds.add(secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: value, parameterNumber: parameterNumber, size: size)))
+	    cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber)))
+
+    }
+	if (cmds) sendToDevice(cmds)
+
 }
 
 void pollDevicesForCurrentValues()
@@ -407,6 +426,7 @@ void pollDevicesForCurrentValues()
 	getAllParameterValues()
 }
 
+/*
 void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
 		{ processConfigurationReport(cmd.parameterNumber as Integer, cmd.scaledConfigurationValue as BigInteger) }
 void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd)
@@ -431,7 +451,31 @@ void processConfigurationReport(parameterNumber, reportedValue) {
 	
 	parameterData.replace(parameterNumber, currentData)
 }
+*/
+void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd)	{ processConfigurationReport(cmd) }
+void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd)	{ processConfigurationReport(cmd) }
 
+void processConfigurationReport(cmd) { 
+
+	if (logEnable) log.debug "Received configuration report for parameter ${cmd.parameterNumber} indicating parameter set to value: ${cmd.scaledConfigurationValue}."
+
+	String parameterName = "configParam${"${cmd.parameterNumber}".padLeft(3, "0")}"
+	def currentValue = settings[parameterName]
+
+	Map currentData = parameterData.get(cmd.parameterNumber as Integer) ?: [:]
+
+	if (currentValue != cmd.scaledConfigurationValue)
+	{
+		settings[parameterName] = cmd.scaledConfigurationValue
+	}
+
+	currentData.put("lastRetrievedValue", cmd.scaledConfigurationValue)
+	currentData.remove("pendingChangeValue")
+	
+	parameterData.replace(cmd.parameterNumber as Integer, currentData)
+	log.debug "parameterData is now: ${parameterData}"
+	state.put("zwaveParameterData", parameterData)
+}
 
 //////////////////////////////////////////////////////////////////////
 //////                  Handle Supervision request            ///////
