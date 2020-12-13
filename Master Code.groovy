@@ -3,7 +3,7 @@ import java.util.concurrent.*;
 import groovy.transform.Field
 
 @Field static  ConcurrentHashMap<Integer, Map> parameterData = new ConcurrentHashMap<Integer, Map>();
-parameterData.put(0 as Integer, 0 as Integer)
+// parameterData.put(0 as Integer, 0 as Integer)
 
 if (state.driverData.is(null)) { state.driverData = [:] }
 
@@ -315,9 +315,9 @@ void updated()
 				newValue = settings[Pvalue.input.name] as Integer  
 			}
 			
-			if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${parameterData[Pkey as Integer].lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(parameterData[Pkey as Integer].lastRetrievedValue as Integer) != newValue}."
+			// if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${parameterData[Pkey as Integer].lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(parameterData[Pkey as Integer].lastRetrievedValue as Integer) != newValue}."
 			
-			if (parameterData[Pkey as Integer]?.lastRetrievedValue  != newValue) 
+			if ( (!parameterData.containsKey(Pkey as Integer)) || (parameterData[Pkey as Integer]?.lastRetrievedValue  != newValue) )
 			{
 				Map currentData = parameterData.get(Pkey as Integer) ?: [:]
 				currentData.put("pendingChangeValue", newValue)
@@ -393,10 +393,10 @@ void setParameter(Short parameterNumber, BigInteger value){
 	List<hubitat.zwave.Command> cmds=[]
 
 	// All versions of configurationSet work the same!
-	cmds.add(secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: (value as BigInteger), parameterNumber: (parameterNumber as Short))))
-		// cmds.add(secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: (value as BigInteger), parameterNumber: (parameterNumber as Short), size: (size as Short))))
+	cmds.add(secure(zwave.configurationV2.configurationSet(scaledConfigurationValue: (value as BigInteger), parameterNumber: (parameterNumber as Short))))
+
 	cmds.add "delay 500"
-	cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber as Integer)))
+	cmds.add(secure(zwave.configurationV2.configurationGet(parameterNumber: parameterNumber as Integer)))
 	
 	if (cmds) sendToDevice(cmds)
 }
@@ -407,17 +407,19 @@ void pollDevicesForCurrentValues()
 	getAllParameterValues()
 }
 
-void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) { processConfigurationReport(cmd) }
-void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) { processConfigurationReport(cmd) }
+void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
+		{ processConfigurationReport(cmd.parameterNumber as Integer, cmd.scaledConfigurationValue as BigInteger) }
+void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd)
+		{ processConfigurationReport(cmd.parameterNumber as Integer, cmd.scaledConfigurationValue as BigInteger) }
 
-void processConfigurationReport(cmd) { 
+void processConfigurationReport(parameterNumber, reportedValue) { 
 
-	if (logEnable) log.debug "Received configuration report for parameter ${cmd.parameterNumber} indicating parameter set to value: ${cmd.scaledConfigurationValue}. Full report contents are: ${cmd}."
+	if (logEnable) log.debug "Received configuration report for parameter ${parameterNumber} indicating parameter set to value: ${reportedValue}."
 
-	String parameterName = "configParam${"${cmd.parameterNumber}".padLeft(3, "0")}"
+	String parameterName = "configParam${"${parameterNumber}".padLeft(3, "0")}"
 	def currentValue = settings[parameterName]
-	def reportedValue  = cmd.scaledConfigurationValue
-	Map currentData = parameterData.get(cmd.parameterNumber as Integer) ?: [:]
+
+	Map currentData = parameterData.get(parameterNumber) ?: [:]
 
 	if (currentValue != reportedValue)
 	{
@@ -427,7 +429,7 @@ void processConfigurationReport(cmd) {
 	currentData.put("lastRetrievedValue", reportedValue)
 	currentData.remove("pendingChangeValue")
 	
-	parameterData.replace(cmd.parameterNumber as Integer, currentData)
+	parameterData.replace(parameterNumber, currentData)
 }
 
 
