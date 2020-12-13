@@ -1,10 +1,10 @@
-/*
-Operation Sequence ...
 
-1. Get the device's firmware using: getFirmwareVersionFromDevice(), store it in state.firmware.[main: ##, sub: ##]
-2. Get the device's database record using: getDeviceDataFromDatabase
+import java.util.concurrent.*;
+import groovy.transform.Field
 
-*/
+@Field static  ConcurrentHashMap<Integer, Map> parameterData = new ConcurrentHashMap<Integer, Map>();
+parameterData.put(0 as Integer, 0 as Integer)
+
 if (state.driverData.is(null)) { state.driverData = [:] }
 
 metadata {
@@ -19,11 +19,10 @@ metadata {
 			// capability "Outlet"		
 			// capability "RelaySwitch"
 			capability "Switch"	
-capability "EnergyMeter"
-capability "PowerMeter"
-capability "VoltageMeasurement"
-
 			
+			capability "EnergyMeter"
+			capability "PowerMeter"
+			capability "VoltageMeasurement"
 		
 		// Include the following for dimmable devices.
 		//	capability "SwitchLevel"
@@ -51,8 +50,8 @@ capability "VoltageMeasurement"
 		/**
 			setParameter is a generalized function for setting parameters.	
 		*/
-			command "setParameter",[[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],
-					[name:"size",type:"NUMBER", description:"Parameter Size", constraints:["NUMBER"]],
+			command "setParameter",[
+					[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],
 					[name:"value",type:"NUMBER", description:"Parameter Value", constraints:["NUMBER"]]
 					]		
 		
@@ -89,7 +88,7 @@ void getDeviceDataFromDatabase()
 		return
 	}
 
-	if (txtEnable) log.info "Getting Device Information from www.opensmarthouse.org Database"
+	if (txtEnable) log.info "Getting datbase information for device ${device.displayName} from www.opensmarthouse.org Database"
   
 	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
 	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
@@ -138,14 +137,15 @@ void getDeviceDataFromDatabase()
             allParameterData = resp.data.parameters
         }
 
-	Map parameterSizes = [:]
 	allParameterData.each
 	{
-		parameterSizes.put(it.param_id, [size:it.size])
+		parameterData.put(it.param_id as Integer, [size:it.size])
 	}
-	state.put("zwaveParameterData", parameterSizes)
+log.warn "All parameterData is: " + parameterData
 		
 	state.parameterInputs = createInputControls(allParameterData)
+	
+	if (!state.parameterInputs.is(null)) log.info "Successfully retrieved data for device ${device.displayName}"
 	
     if (logEnable) log.debug newData
 	
@@ -227,7 +227,6 @@ void installed()
     if (state.driverData.is(null) )  state.driverData = [:] 
     if (state.parameterInputs.is(null)) state.parameterInputs =[:]
 	if (state.ZwaveClassVersions.is(null)) state.ZwaveClassVersions = [:]
-	if (state.zwaveParameterData.is(null)) state.zwaveParameterData = [:]
 
 	initialize()
 }
@@ -247,7 +246,6 @@ void initialize()
     if (state.driverData.is(null) )  state.driverData = [:] 
     if (state.parameterInputs.is(null)) state.parameterInputs =[:]
 	if (state.ZwaveClassVersions.is(null)) state.ZwaveClassVersions = [:]
-	if (state.zwaveParameterData.is(null)) state.zwaveParameterData = [:]
 
   	getZwaveClassVersions()
 	/** The returned command classes are used in zwave.parse, so wait a bit for them to be processed before the next step.
@@ -256,12 +254,13 @@ void initialize()
   
   /**
   Because of bug in saving state data described here: https://community.hubitat.com/t/2-2-4-156-bug-setting-state-variable-race-condition-c7/57893/16
-  The next functions were chained so they start from the version report handler -- for getDeviceDataFromDatabase() -- and then pollDevicesForCurrentValues() is started from getDeviceDataFromDatabase after the device data is received
+  The next functions was moved so its not called from the report handler firmware version handler
   */
 	// getDeviceDataFromDatabase()
-
-	runIn(5,pollDevicesForCurrentValues)
+	
 	runIn(10, meterSupportedGet)
+	runIn(15,pollDevicesForCurrentValues)
+
 }
 
 /** Miscellaneous state and device data cleanup tool used during debugging and development
@@ -291,6 +290,7 @@ void updated()
 {
 	if (txtEnable) log.info "Updating changed parameters . . ."
 	if (logEnable) runIn(1800,logsOff)
+	log.debug "In Updated function value of parameterData is ${parameterData}"
 
 	/*
 	state.parameterInputs is arranged in key : value pairs.
@@ -315,29 +315,40 @@ void updated()
 				newValue = settings[Pvalue.input.name] as Integer  
 			}
 			
-			if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${state.zwaveParameterData[Pkey].lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(state.zwaveParameterData[Pkey].lastRetrievedValue as Integer) != newValue}."
+			if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${parameterData[Pkey as Integer].lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(parameterData[Pkey as Integer].lastRetrievedValue as Integer) != newValue}."
 			
-			if (state.zwaveParameterData[Pkey]?.lastRetrievedValue  != newValue) 
+			if (parameterData[Pkey as Integer]?.lastRetrievedValue  != newValue) 
 			{
-                if (txtEnable) log.info "Updating Zwave parameter ${Pkey} to new value ${newValue}"
-				state.zwaveParameterData[Pkey].put("pendingChangeValue", newValue)
+				Map currentData = parameterData.get(Pkey as Integer) ?: [:]
+				currentData.put("pendingChangeValue", newValue)
+				
+				if (parameterData.containsKey(Pkey as Integer) )
+					{				
+						parameterData.replace(Pkey as Integer, currentData)
+					}
+					else
+					{
+						parameterData.put(Pkey as Integer, currentData)
+					}
+
+                if (txtEnable) log.info "Updating Zwave parameter ${Pkey} to new value ${parameterData.get(Pkey as Integer)}"
 			}
 		}
 	} 
+	log.debug "parameterData is: ${parameterData}"
 	processPendingChanges()
 }
 
 void processPendingChanges()
 {
-log.debug "Processing pending parameter changes. state.zwaveParameterData is: ${state.zwaveParameterData}"
+log.debug "Processing pending parameter changes. parameterData is: ${parameterData}"
 
-	state.zwaveParameterData.each{ Pkey, parameterInfo ->
-		if (!parameterInfo?.pendingChangeValue.is( null) )
+	parameterData.each{ Pkey, parameterInfo ->
+		if (! parameterInfo.pendingChangeValue.is( null ) )
 		{
-			log.info "Changing parameter ${Pkey} value from ${parameterInfo.lastRetrievedValue} to ${parameterInfo.pendingChangeValue}."
-			setParameter(Pkey as Integer, parameterInfo.size as Integer, parameterInfo.pendingChangeValue as Integer ) 
-		}
-	
+			log.debug "Parameters for setParameter are: parameterNumber: ${Pkey as Short}, ${parameterInfo.pendingChangeValue as BigInteger}."
+			 setParameter((Pkey as Short), (parameterInfo.pendingChangeValue as BigInteger) ) 
+		 }
 	}
 }
 
@@ -357,26 +368,33 @@ void getParameterValue(parameterNumber)
 void getAllParameterValues()
 {
     List<hubitat.zwave.Command> cmds=[]	
-	state.zwaveParameterData.each{k, v ->
+	parameterData.each{k, v ->
 	 	if (logEnable) log.debug "Getting value of parameter ${k}"
 		cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: k as Integer)))
 		cmds.add "delay 250"
 		}
-	if (cmds) sendToDevice(cmds)
+	if (cmds) 
+		{
+		log.info "Sending commands to device ${device.displayName} to get parameter values."
+		sendToDevice(cmds)
+		}
+		else{
+		log.info "No parameter values to retrieve for ${device.displayName}."
+		}
 }
 
-void setParameter(parameterNumber, parameterSize, value){
-	if (txtEnable) log.info "Setting parameter ${parameterNumber}, of size ${parameterSize} to value ${value}."
-    if (parameterNumber.is( null ) || parameterSize.is( null ) || value.is( null )) {
-		log.warn "incomplete parameter list supplied..."
-		log.warn "syntax: setParameter(parameterNumber,parameterSize,value)"
+void setParameter(Short parameterNumber, BigInteger value){
+	if (txtEnable) log.info "Setting parameter ${parameterNumber} to value ${value}."
+    if (parameterNumber.is( null ) || value.is( null )) {
+		log.warn "Incomplete setParameter argument list supplied. Correct syntax: setParameter(Short parameterNumber, BigInteger value)"
 		return
     } 
 
 	List<hubitat.zwave.Command> cmds=[]
 
 	// All versions of configurationSet work the same!
-	cmds.add(secure(zwave.configurationV2.configurationSet(scaledConfigurationValue: value as Integer, parameterNumber: parameterNumber as Integer, size: parameterSize as Integer)))
+	cmds.add(secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: (value as BigInteger), parameterNumber: (parameterNumber as Short))))
+		// cmds.add(secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: (value as BigInteger), parameterNumber: (parameterNumber as Short), size: (size as Short))))
 	cmds.add "delay 500"
 	cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber as Integer)))
 	
@@ -385,36 +403,33 @@ void setParameter(parameterNumber, parameterSize, value){
 
 void pollDevicesForCurrentValues()
 { 	// On startup, poll all the devices for their initial values!
+	log.info "Getting current values of all device parameters."
 	getAllParameterValues()
 }
 
+void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) { processConfigurationReport(cmd) }
+void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) { processConfigurationReport(cmd) }
 
-void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) { processReceivedParameterData(cmd) }
-void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) { processReceivedParameterData(cmd) }
+void processConfigurationReport(cmd) { 
 
-void processReceivedParameterData(cmd)
-{
 	if (logEnable) log.debug "Received configuration report for parameter ${cmd.parameterNumber} indicating parameter set to value: ${cmd.scaledConfigurationValue}. Full report contents are: ${cmd}."
 
-		String parameterName = "configParam${"${cmd.parameterNumber}".padLeft(3, "0")}"
-		def currentValue = settings[parameterName]
-		def reportedValue  = cmd.scaledConfigurationValue
-		
-		// Sometimes the 	www.opemsmarthouse.org database has the wrong parameter sizes. This tries to correct that!
-		if ((!state.zwaveParameterData[(cmd.parameterNumber)].is( null ) )  && (cmd.size != state.zwaveParameterData[(cmd.parameterNumber)].size))
-		{
-			log.warn "Configuration report V1 returned from device for parameter ${cmd.parameterNumber} indicates a size of ${cmd.size}, while the database from www.opensmarthouse.org gave a size of ${state.zwaveParameterData["$cmd.parameterNumber"].size}. Please report to developer! Making correction to local database. Please try your parameter setting again."
-			state.zwaveParameterData.put("${cmd.parameterNumber}", [size:cmd.size])
-		}
-		
-		if (currentValue != reportedValue)
-		{
-			settings[parameterName] = reportedValue
-		}
+	String parameterName = "configParam${"${cmd.parameterNumber}".padLeft(3, "0")}"
+	def currentValue = settings[parameterName]
+	def reportedValue  = cmd.scaledConfigurationValue
+	Map currentData = parameterData.get(cmd.parameterNumber as Integer) ?: [:]
 
-    if (logEnable) log.debug "state.zwaveParameterData is: ${state.zwaveParameterData}, and state.zwaveParameterData[(cmd.parameterNumber)] is ${state.zwaveParameterData["${cmd.parameterNumber}"]}"
-		state.zwaveParameterData["${cmd.parameterNumber}"].put("lastRetrievedValue", (cmd.scaledConfigurationValue))
+	if (currentValue != reportedValue)
+	{
+		settings[parameterName] = reportedValue
+	}
+
+	currentData.put("lastRetrievedValue", reportedValue)
+	currentData.remove("pendingChangeValue")
+	
+	parameterData.replace(cmd.parameterNumber as Integer, currentData)
 }
+
 
 //////////////////////////////////////////////////////////////////////
 //////                  Handle Supervision request            ///////
