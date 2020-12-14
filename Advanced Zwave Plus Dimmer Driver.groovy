@@ -36,6 +36,8 @@ metadata {
 			capability "EnergyMeter"
 			capability "PowerMeter"
 			capability "VoltageMeasurement"
+			
+			capability "Battery"
 		
 		// Include the following for dimmable devices.
 		    capability "SwitchLevel"
@@ -52,7 +54,7 @@ metadata {
 			command "doubleTap", ["NUMBER"]
 			
 			command "meterRefresh"
-			
+			command "batteryGet"
         // The following is for debugging. In final code, it can be removed!
     	// command "getDeviceDataFromDatabase"
 		
@@ -1027,7 +1029,19 @@ void processMeterReport( cmd) {
 		log.warn "Received unexpected meter type for ${device.label?device.label:device.name}. Only type '1' (Electric Meter) is supported. Received type: ${cmd.meterType}"
 	}
 }
+//////////////////////////////////////////////////////////////////////
+//////        Handle Battery Reports and Device Functions        ///////
+////////////////////////////////////////////////////////////////////// 
+void zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) 
+{
+eventProcess ( name: "battery", value:cmd.batteryLevel, unit: "%", descriptionText: "Device ${device.displayName} battery level is ${cmd.batteryLevel}.")
+}
 
+void batteryGet() {
+	List<hubitat.zwave.Command> cmds = []
+    cmds << zwave.batteryV1.batteryGet()
+	if (cmds) sendToDevice(cmds)
+}
 
 //////////////////////////////////////////////////////////////////////
 //////        Handle Basic Reports and Device Functions        ///////
