@@ -18,7 +18,7 @@ void setIsDigitalEvent(Boolean value) {
 	}
 Map getZwaveClassMap() { return deviceData.get(device.getIdAsLong()).ZwaveClassMap }
 Map getZwaveParameterData() { return deviceData.get(device.getIdAsLong()).parameterData } 
-Map getcentralSceneButtonState() { return getcentralSceneButtonState.get(device.getIdAsLong()) }
+Map getcentralSceneButtonState() { return centralSceneButtonState.get(device.getIdAsLong()) }
 
 metadata {
 	definition (name: "Advanced Zwave Plus Metering Dimmer",namespace: "jvm", author: "jvm") {
@@ -180,7 +180,7 @@ Map createInputControls(data)
 		{
 			if (!(inputControls?.get(it.param_id)))
 			{
-				Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) Choose Multiple", type:"enum", multiple: true, options: [:]]
+				Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) Choose Multiple", type:"enum", multiple: true, size:it.size, options: [:]]
 
                 newInput.options.put(it.bitmask.toInteger(), "${it.description}")
 				
@@ -198,7 +198,7 @@ Map createInputControls(data)
 		}
 		else
 		{
-			Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) ${it.label}", description: it.description, defaultValue: it.default]
+			Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) ${it.label}", description: it.description, size:it.size, defaultValue: it.default]
 			
 			def deviceOptions = [:]
 			it.options.each
@@ -341,9 +341,9 @@ void updated()
 			
 			// if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${parameterData[Pkey as Integer].lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(parameterData[Pkey as Integer].lastRetrievedValue as Integer) != newValue}."
 			
-			if ( (!getZwaveParameterData().containsKey(Pkey as Integer)) || (getZwaveParameterData().get(Pkey as Integer)?.lastRetrievedValue  != newValue) )
+			if ( (!getZwaveParameterData()?.containsKey(Pkey as Integer)) || (getZwaveParameterData()?.get(Pkey as Integer)?.lastRetrievedValue  != newValue) )
 			{
-				Map currentData = getZwaveParameterData().get(Pkey as Integer) ?: [:]
+				Map currentData = getZwaveParameterData()?.get(Pkey as Integer) ?: [:]
 				currentData.put("pendingChangeValue", newValue)
 				
 				if (getZwaveParameterData().containsKey(Pkey as Integer) )
@@ -359,7 +359,7 @@ void updated()
 			}
 		}
 	} 
-	if (logEnable) log.debuglog.debug "parameterData is: ${getZwaveParameterData()}"
+	if (logEnable) log.debug "parameterData is: ${getZwaveParameterData()}"
 	processPendingChanges()
 }
 
@@ -370,7 +370,7 @@ void processPendingChanges()
 	getZwaveParameterData().each{ Pkey, parameterInfo ->
 		if (! parameterInfo.pendingChangeValue.is( null ) )
 		{
-			if (logEnable) log.debuglog.debug "Parameters for setParameter are: parameterNumber: ${Pkey as Short}, size: ${parameterInfo.size as Short}, value: ${parameterInfo.pendingChangeValue as BigInteger}."
+			if (logEnable) log.debug "Parameters for setParameter are: parameterNumber: ${Pkey as Short}, size: ${parameterInfo.size as Short}, value: ${parameterInfo.pendingChangeValue as BigInteger}."
 			 setParameter((Pkey as Short), (parameterInfo.size as Short), (parameterInfo.pendingChangeValue as BigInteger) ) 
 		 }
 	}
