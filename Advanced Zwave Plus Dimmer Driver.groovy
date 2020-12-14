@@ -2,17 +2,23 @@
 import java.util.concurrent.*;
 import groovy.transform.Field
 
-@Field static  Integer driverVersion = 1
+@Field static  Integer driverVersion = 2
 // @Field static  ConcurrentHashMap<Integer, Map> 		parameterData = new ConcurrentHashMap<Integer, Map>();
 // @Field static  ConcurrentHashMap<Integer, Integer> 	ZwaveClassMap = new ConcurrentHashMap<Integer, Integer>();
-@Field static  Map centralSceneButtonState = [:]
+@Field static  ConcurrentHashMap<Long, Map> centralSceneButtonState = new ConcurrentHashMap<Long, Map>()
+@Field static  ConcurrentHashMap<Long, Boolean> EventTypeIsDigital = new ConcurrentHashMap<Long, Boolean>()
 
 @Field static  ConcurrentHashMap<Long, Map> 		deviceData = new ConcurrentHashMap<Long, Map>();
 
-Boolean isDigitalEvent() { return deviceData.get(device.getIdAsLong()).EventTypeIsDigital as Boolean }
-void setIsDigitalEvent(Boolean value) { deviceData.get(device.getIdAsLong()).EventTypeIsDigital = value }
+Boolean isDigitalEvent() { return EventTypeIsDigital.get(device.getIdAsLong()) as Boolean }
+void setIsDigitalEvent(Boolean value) { 
+	if (EventTypeIsDigital.containsKey(device.getIdAsLong()) ) 
+		{EventTypeIsDigital.replace(device.getIdAsLong(), value) }
+			else {EventTypeIsDigital.replace(device.getIdAsLong(), value) }
+	}
 Map getZwaveClassMap() { return deviceData.get(device.getIdAsLong()).ZwaveClassMap }
 Map getZwaveParameterData() { return deviceData.get(device.getIdAsLong()).parameterData } 
+Map getcentralSceneButtonState() { return getcentralSceneButtonState.get(device.getIdAsLong()) }
 
 metadata {
 	definition (name: "Advanced Zwave Plus Metering Dimmer",namespace: "jvm", author: "jvm") {
@@ -251,8 +257,16 @@ void initialize()
 {
     if (!deviceData.containsKey(device.getIdAsLong()) )
 	{
-	deviceData.put(device.getIdAsLong(), [centralSceneButtonState: [:],EventTypeIsDigital: false, ZwaveClassMap: [:], parameterData: [:] ])
-    }
+	deviceData.put(device.getIdAsLong(), [ZwaveClassMap: [:], parameterData: [:] ])
+	}
+	if (! centralSceneButtonState.containsKey(device.getIdAsLong()))
+	{
+	    centralSceneButtonState.put(device.getIdAsLong(), [:])
+	}
+	if (! EventTypeIsDigital.containsKey(device.getIdAsLong()) )
+	{
+		EventTypeIsDigital.put(device.getIdAsLong(), false )
+	}
 	
     log.debug "deviceData is: ${deviceData.get( device.getIdAsLong() )}"
 
@@ -690,7 +704,7 @@ void forceReleaseMessage(button)
 	// only need to force a release hold if the button state is "held" when the timer expires
     log.warn "Central Scene Release message for button ${button} not received before timeout - Faking a release message!"
     sendEvent(name:"released", value:button , type:"digital", isStateChange:true, descriptionText:"${device.displayName} button ${button} forced release")
-	centralSceneButtonState.put(button as Integer, "released")
+	getcentralSceneButtonState().put(button as Integer, "released")
 }
 
 void forceReleaseHold01(){ forceReleaseMessage(1)}
@@ -782,7 +796,7 @@ void ProcessCCReport(cmd) {
 	
 	if(logEnable) log.debug "Mapping of key attributes to Taps: ${taps}"
 	
-		if (centralSceneButtonState.get(cmd.sceneNumber as Integer) == "held")
+		if (getcentralSceneButtonState().get(cmd.sceneNumber as Integer) == "held")
 		{
 			// if currently holding, and receive anything except another hold or a release, 
 			// then cancel any outstanding lost "release" message timer ...
@@ -806,7 +820,7 @@ void ProcessCCReport(cmd) {
 				event.value = cmd.sceneNumber
 				event.descriptionText="${device.displayName} button ${event.value} released"
 				if (txtEnable) log.info event.descriptionText
-				centralSceneButtonState.put(cmd.sceneNumber as Integer, event.name)
+				getcentralSceneButtonState().put(cmd.sceneNumber as Integer, event.name)
 
 				sendEvent(event)
 				break
@@ -815,7 +829,7 @@ void ProcessCCReport(cmd) {
 				event.name = "held" 
 				event.value = cmd.sceneNumber
 
-				if (centralSceneButtonState.get(cmd.sceneNumber as Integer) == "held")
+				if (getcentralSceneButtonState().get(cmd.sceneNumber as Integer) == "held")
 				{
 					// If currently holding and receive a refresh, don't send another hold message
 					// Just report that still holding
@@ -827,7 +841,7 @@ void ProcessCCReport(cmd) {
 				{
 					event.descriptionText="${device.displayName} button ${event.value} held"
 					if (txtEnable) log.info event.descriptionText
-					centralSceneButtonState.put(cmd.sceneNumber as Integer, event.name)
+					getcentralSceneButtonState().put(cmd.sceneNumber as Integer, event.name)
 					sendEvent(event)
 				}
 				
@@ -841,7 +855,7 @@ void ProcessCCReport(cmd) {
 				event.value= cmd.sceneNumber
 				event.descriptionText="${device.displayName} button ${event.value} pushed"
 				if (txtEnable) log.info event.descriptionText
-				centralSceneButtonState.put(cmd.sceneNumber as Integer, event.name)
+				getcentralSceneButtonState().put(cmd.sceneNumber as Integer, event.name)
 				sendEvent(event)
 				break				
 	 
@@ -850,7 +864,7 @@ void ProcessCCReport(cmd) {
 				event.value=cmd.sceneNumber
 				event.descriptionText="${device.displayName} button ${cmd.sceneNumber} doubleTapped"
 				if (txtEnable) log.info event.descriptionText
-				centralSceneButtonState.put(cmd.sceneNumber as Integer, event.name)
+				getcentralSceneButtonState().put(cmd.sceneNumber as Integer, event.name)
 				sendEvent(event)			
 				break
 			
