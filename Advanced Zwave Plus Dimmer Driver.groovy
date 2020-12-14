@@ -3,8 +3,8 @@ import java.util.concurrent.*;
 import groovy.transform.Field
 
 @Field static  Integer driverVersion = 1
-@Field static  ConcurrentHashMap<Integer, Map> 		parameterData = new ConcurrentHashMap<Integer, Map>();
-@Field static  ConcurrentHashMap<Integer, Integer> 	ZwaveClassMap = new ConcurrentHashMap<Integer, Integer>();
+// @Field static  ConcurrentHashMap<Integer, Map> 		parameterData = new ConcurrentHashMap<Integer, Map>();
+// @Field static  ConcurrentHashMap<Integer, Integer> 	ZwaveClassMap = new ConcurrentHashMap<Integer, Integer>();
 @Field static  Map centralSceneButtonState = [:]
 
 @Field static  ConcurrentHashMap<Long, Map> 		deviceData = new ConcurrentHashMap<Long, Map>();
@@ -12,6 +12,7 @@ import groovy.transform.Field
 Boolean isDigitalEvent() { return deviceData.get(device.getIdAsLong()).EventTypeIsDigital as Boolean }
 void setIsDigitalEvent(Boolean value) { deviceData.get(device.getIdAsLong()).EventTypeIsDigital = value }
 Map getZwaveClassMap() { return deviceData.get(device.getIdAsLong()).ZwaveClassMap }
+Map getZwaveParameterData() { return deviceData.get(device.getIdAsLong()).parameterData } 
 
 metadata {
 	definition (name: "Advanced Zwave Plus Metering Dimmer",namespace: "jvm", author: "jvm") {
@@ -146,9 +147,9 @@ void getDeviceDataFromDatabase()
 
 	allParameterData.each
 	{
-		parameterData.put(it.param_id as Integer, [size:it.size])
+		getZwaveParameterData().put(it.param_id as Integer, [size:it.size])
 	}
-log.warn "All parameterData is: " + parameterData
+log.warn "All parameterData is: " + getZwaveParameterData()
 		
 	state.parameterInputs = createInputControls(allParameterData)
 	
@@ -326,33 +327,33 @@ void updated()
 			
 			// if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${parameterData[Pkey as Integer].lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(parameterData[Pkey as Integer].lastRetrievedValue as Integer) != newValue}."
 			
-			if ( (!parameterData.containsKey(Pkey as Integer)) || (parameterData[Pkey as Integer]?.lastRetrievedValue  != newValue) )
+			if ( (!getZwaveParameterData().containsKey(Pkey as Integer)) || (getZwaveParameterData().get(Pkey as Integer)?.lastRetrievedValue  != newValue) )
 			{
-				Map currentData = parameterData.get(Pkey as Integer) ?: [:]
+				Map currentData = getZwaveParameterData().get(Pkey as Integer) ?: [:]
 				currentData.put("pendingChangeValue", newValue)
 				
-				if (parameterData.containsKey(Pkey as Integer) )
+				if (getZwaveParameterData().containsKey(Pkey as Integer) )
 					{				
-						parameterData.replace(Pkey as Integer, currentData)
+						getZwaveParameterData().put(Pkey as Integer, currentData)
 					}
 					else
 					{
-						parameterData.put(Pkey as Integer, currentData)
+						getZwaveParameterData().put(Pkey as Integer, currentData)
 					}
 
-                if (txtEnable) log.info "Updating Zwave parameter ${Pkey} to new value ${parameterData.get(Pkey as Integer)}"
+                if (txtEnable) log.info "Updating Zwave parameter ${Pkey} to new value ${getZwaveParameterData().get(Pkey as Integer)}"
 			}
 		}
 	} 
-	log.debug "parameterData is: ${parameterData}"
+	log.debug "parameterData is: ${getZwaveParameterData()}"
 	processPendingChanges()
 }
 
 void processPendingChanges()
 {
-log.debug "Processing pending parameter changes. parameterData is: ${parameterData}"
+log.debug "Processing pending parameter changes. parameterData is: ${getZwaveParameterData()}"
 
-	parameterData.each{ Pkey, parameterInfo ->
+	getZwaveParameterData().each{ Pkey, parameterInfo ->
 		if (! parameterInfo.pendingChangeValue.is( null ) )
 		{
 			log.debug "Parameters for setParameter are: parameterNumber: ${Pkey as Short}, size: ${parameterInfo.size as Short}, value: ${parameterInfo.pendingChangeValue as BigInteger}."
@@ -377,7 +378,7 @@ void getParameterValue(parameterNumber)
 void getAllParameterValues()
 {
     List<hubitat.zwave.Command> cmds=[]	
-	parameterData.each{k, v ->
+	getZwaveParameterData().each{k, v ->
 	 	if (logEnable) log.debug "Getting value of parameter ${k}"
 		cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: k as Integer)))
 		cmds.add "delay 250"
@@ -424,7 +425,7 @@ void processConfigurationReport(cmd) {
 	String parameterName = "configParam${"${cmd.parameterNumber}".padLeft(3, "0")}"
 	def currentValue = settings[parameterName]
 
-	Map currentData = parameterData.get(cmd.parameterNumber as Integer) ?: [:]
+	Map currentData = getZwaveParameterData().get(cmd.parameterNumber as Integer) ?: [:]
 
 	if (currentValue != cmd.scaledConfigurationValue)
 	{
@@ -434,9 +435,9 @@ void processConfigurationReport(cmd) {
 	currentData.put("lastRetrievedValue", cmd.scaledConfigurationValue)
 	currentData.remove("pendingChangeValue")
 	
-	parameterData.replace(cmd.parameterNumber as Integer, currentData)
-	if (logEnable) log.debug "parameterData is now: ${parameterData}"
-	// state.put("zwaveParameterData", parameterData)
+	getZwaveParameterData().put(cmd.parameterNumber as Integer, currentData)
+	if (logEnable) log.debug "parameterData is now: ${getZwaveParameterData()}"
+
 }
 
 //////////////////////////////////////////////////////////////////////
