@@ -51,8 +51,8 @@ metadata {
 			capability "Battery"
 		
 		// Include the following for dimmable devices.
-		    // capability "SwitchLevel"
-		    // capability "ChangeLevel"
+		 // capability "SwitchLevel"
+		// capability "ChangeLevel"
 		
 		// Central Scene functions. Include the "commands" if you want to generate central scene actions from the web interface. If they are not included, central scene will still be generated from the device.
 			capability "PushableButton"
