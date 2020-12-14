@@ -18,7 +18,18 @@ void setIsDigitalEvent(Boolean value) {
 	}
 Map getZwaveClassMap() { return deviceData.get(device.getIdAsLong()).ZwaveClassMap }
 Map getZwaveParameterData() { return deviceData.get(device.getIdAsLong()).parameterData } 
-Map getcentralSceneButtonState() { return getcentralSceneButtonState.get(device.getIdAsLong()) }
+Map getcentralSceneButtonState() { return centralSceneButtonState.get(device.getIdAsLong()) }
+
+void putcentralSceneButtonState(Integer button, String state)
+{
+	Map centralScene = centralSceneButtonState?.get(device.getIdAsLong())
+	if (centralScene.is( null ) )
+	{
+		centralSceneButtonState.put(device.getIdAsLong(), [:])
+		centralScene = centralSceneButtonState.get(device.getIdAsLong())
+	}
+	centralScene.put(button, state)
+}
 
 metadata {
 	definition (name: "Advanced Zwave Plus Metering Switch",namespace: "jvm", author: "jvm") {
@@ -36,6 +47,8 @@ metadata {
 			capability "EnergyMeter"
 			capability "PowerMeter"
 			capability "VoltageMeasurement"
+			
+			capability "Battery"
 		
 		// Include the following for dimmable devices.
 		    // capability "SwitchLevel"
@@ -52,7 +65,7 @@ metadata {
 			command "doubleTap", ["NUMBER"]
 			
 			command "meterRefresh"
-			
+			command "batteryGet"
         // The following is for debugging. In final code, it can be removed!
     	// command "getDeviceDataFromDatabase"
 		
@@ -180,7 +193,7 @@ Map createInputControls(data)
 		{
 			if (!(inputControls?.get(it.param_id)))
 			{
-				Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) Choose Multiple", type:"enum", multiple: true, options: [:]]
+				Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) Choose Multiple", type:"enum", multiple: true, size:it.size, options: [:]]
 
                 newInput.options.put(it.bitmask.toInteger(), "${it.description}")
 				
@@ -198,7 +211,7 @@ Map createInputControls(data)
 		}
 		else
 		{
-			Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) ${it.label}", description: it.description, defaultValue: it.default]
+			Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) ${it.label}", description: it.description, size:it.size, defaultValue: it.default]
 			
 			def deviceOptions = [:]
 			it.options.each
@@ -268,7 +281,7 @@ void initialize()
 		EventTypeIsDigital.put(device.getIdAsLong(), false )
 	}
 	
-    log.debug "deviceData is: ${deviceData.get( device.getIdAsLong() )}"
+    if (logEnable) log.debug "deviceData is: ${deviceData.get( device.getIdAsLong() )}"
 
 	if (state.driverVersion != driverVersion)
 	{
@@ -314,7 +327,7 @@ void updated()
 {
 	if (txtEnable) log.info "Updating changed parameters . . ."
 	if (logEnable) runIn(1800,logsOff)
-	log.debug "In Updated function value of parameterData is ${parameterData}"
+	if (logEnable) log.debug "In Updated function value of parameterData is ${getZwaveParameterData()}"
 
 	/*
 	state.parameterInputs is arranged in key : value pairs.
@@ -341,9 +354,9 @@ void updated()
 			
 			// if (logEnable) log.debug "Parameter ${Pkey}, last retrieved value: ${parameterData[Pkey as Integer].lastRetrievedValue}, New setting value = ${newValue}, Changed: ${(parameterData[Pkey as Integer].lastRetrievedValue as Integer) != newValue}."
 			
-			if ( (!getZwaveParameterData().containsKey(Pkey as Integer)) || (getZwaveParameterData().get(Pkey as Integer)?.lastRetrievedValue  != newValue) )
+			if ( (!getZwaveParameterData()?.containsKey(Pkey as Integer)) || (getZwaveParameterData()?.get(Pkey as Integer)?.lastRetrievedValue  != newValue) )
 			{
-				Map currentData = getZwaveParameterData().get(Pkey as Integer) ?: [:]
+				Map currentData = getZwaveParameterData()?.get(Pkey as Integer) ?: [:]
 				currentData.put("pendingChangeValue", newValue)
 				
 				if (getZwaveParameterData().containsKey(Pkey as Integer) )
@@ -359,18 +372,18 @@ void updated()
 			}
 		}
 	} 
-	log.debug "parameterData is: ${getZwaveParameterData()}"
+	if (logEnable) log.debug "parameterData is: ${getZwaveParameterData()}"
 	processPendingChanges()
 }
 
 void processPendingChanges()
 {
-log.debug "Processing pending parameter changes. parameterData is: ${getZwaveParameterData()}"
+	if (logEnable) log.debug "Processing pending parameter changes. parameterData is: ${getZwaveParameterData()}"
 
 	getZwaveParameterData().each{ Pkey, parameterInfo ->
 		if (! parameterInfo.pendingChangeValue.is( null ) )
 		{
-			log.debug "Parameters for setParameter are: parameterNumber: ${Pkey as Short}, size: ${parameterInfo.size as Short}, value: ${parameterInfo.pendingChangeValue as BigInteger}."
+			if (logEnable) log.debug "Parameters for setParameter are: parameterNumber: ${Pkey as Short}, size: ${parameterInfo.size as Short}, value: ${parameterInfo.pendingChangeValue as BigInteger}."
 			 setParameter((Pkey as Short), (parameterInfo.size as Short), (parameterInfo.pendingChangeValue as BigInteger) ) 
 		 }
 	}
@@ -411,7 +424,7 @@ void getAllParameterValues()
 void setParameter(Short parameterNumber = null, Short size = null, BigInteger value = null){
 	List<hubitat.zwave.Command> cmds=[]
 
-    if (parameterNumber == null || size == null || value == null) {
+    if (parameterNumber.is( null ) || size.is( null ) || value.is( null ) ) {
 		log.warn "Incomplete parameter list supplied... syntax: setParameter(parameterNumber,size,value)"
     } else {
 	    cmds.add(secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: value, parameterNumber: parameterNumber, size: size)))
@@ -704,7 +717,7 @@ void forceReleaseMessage(button)
 	// only need to force a release hold if the button state is "held" when the timer expires
     log.warn "Central Scene Release message for button ${button} not received before timeout - Faking a release message!"
     sendEvent(name:"released", value:button , type:"digital", isStateChange:true, descriptionText:"${device.displayName} button ${button} forced release")
-	getcentralSceneButtonState().put(button as Integer, "released")
+	putcentralSceneButtonState(button as Integer, "released")
 }
 
 void forceReleaseHold01(){ forceReleaseMessage(1)}
@@ -796,7 +809,7 @@ void ProcessCCReport(cmd) {
 	
 	if(logEnable) log.debug "Mapping of key attributes to Taps: ${taps}"
 	
-		if (getcentralSceneButtonState().get(cmd.sceneNumber as Integer) == "held")
+		if (getcentralSceneButtonState()?.get(cmd.sceneNumber as Integer) == "held")
 		{
 			// if currently holding, and receive anything except another hold or a release, 
 			// then cancel any outstanding lost "release" message timer ...
@@ -820,7 +833,7 @@ void ProcessCCReport(cmd) {
 				event.value = cmd.sceneNumber
 				event.descriptionText="${device.displayName} button ${event.value} released"
 				if (txtEnable) log.info event.descriptionText
-				getcentralSceneButtonState().put(cmd.sceneNumber as Integer, event.name)
+				putcentralSceneButtonState(cmd.sceneNumber as Integer, event.name)
 
 				sendEvent(event)
 				break
@@ -829,7 +842,7 @@ void ProcessCCReport(cmd) {
 				event.name = "held" 
 				event.value = cmd.sceneNumber
 
-				if (getcentralSceneButtonState().get(cmd.sceneNumber as Integer) == "held")
+				if (getcentralSceneButtonState()?.get(cmd.sceneNumber as Integer) == "held")
 				{
 					// If currently holding and receive a refresh, don't send another hold message
 					// Just report that still holding
@@ -841,7 +854,7 @@ void ProcessCCReport(cmd) {
 				{
 					event.descriptionText="${device.displayName} button ${event.value} held"
 					if (txtEnable) log.info event.descriptionText
-					getcentralSceneButtonState().put(cmd.sceneNumber as Integer, event.name)
+					putcentralSceneButtonState(cmd.sceneNumber as Integer, event.name)
 					sendEvent(event)
 				}
 				
@@ -855,7 +868,7 @@ void ProcessCCReport(cmd) {
 				event.value= cmd.sceneNumber
 				event.descriptionText="${device.displayName} button ${event.value} pushed"
 				if (txtEnable) log.info event.descriptionText
-				getcentralSceneButtonState().put(cmd.sceneNumber as Integer, event.name)
+				putcentralSceneButtonState(cmd.sceneNumber as Integer, event.name)
 				sendEvent(event)
 				break				
 	 
@@ -864,7 +877,7 @@ void ProcessCCReport(cmd) {
 				event.value=cmd.sceneNumber
 				event.descriptionText="${device.displayName} button ${cmd.sceneNumber} doubleTapped"
 				if (txtEnable) log.info event.descriptionText
-				getcentralSceneButtonState().put(cmd.sceneNumber as Integer, event.name)
+				putcentralSceneButtonState(cmd.sceneNumber as Integer, event.name)
 				sendEvent(event)			
 				break
 			
@@ -895,7 +908,7 @@ void meterSupportedGet()
 	}
 	else
 	{
-	log.debug "Meter Supported Get Function not supported by device ${device.displayName}"
+	if (logEnable) log.debug "Meter Supported Get Function not supported by device ${device.displayName}"
 	}
 }
 void meterReset() {
@@ -1027,7 +1040,19 @@ void processMeterReport( cmd) {
 		log.warn "Received unexpected meter type for ${device.label?device.label:device.name}. Only type '1' (Electric Meter) is supported. Received type: ${cmd.meterType}"
 	}
 }
+//////////////////////////////////////////////////////////////////////
+//////        Handle Battery Reports and Device Functions        ///////
+////////////////////////////////////////////////////////////////////// 
+void zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) 
+{
+eventProcess ( name: "battery", value:cmd.batteryLevel, unit: "%", descriptionText: "Device ${device.displayName} battery level is ${cmd.batteryLevel}.")
+}
 
+void batteryGet() {
+	List<hubitat.zwave.Command> cmds = []
+    cmds << zwave.batteryV1.batteryGet()
+	if (cmds) sendToDevice(cmds)
+}
 
 //////////////////////////////////////////////////////////////////////
 //////        Handle Basic Reports and Device Functions        ///////
