@@ -268,7 +268,7 @@ void initialize()
 		EventTypeIsDigital.put(device.getIdAsLong(), false )
 	}
 	
-    log.debug "deviceData is: ${deviceData.get( device.getIdAsLong() )}"
+    if (logEnable) log.debug "deviceData is: ${deviceData.get( device.getIdAsLong() )}"
 
 	if (state.driverVersion != driverVersion)
 	{
@@ -314,7 +314,7 @@ void updated()
 {
 	if (txtEnable) log.info "Updating changed parameters . . ."
 	if (logEnable) runIn(1800,logsOff)
-	log.debug "In Updated function value of parameterData is ${parameterData}"
+	if (logEnable) log.debug "In Updated function value of parameterData is ${getZwaveParameterData()}"
 
 	/*
 	state.parameterInputs is arranged in key : value pairs.
@@ -359,18 +359,18 @@ void updated()
 			}
 		}
 	} 
-	log.debug "parameterData is: ${getZwaveParameterData()}"
+	if (logEnable) log.debuglog.debug "parameterData is: ${getZwaveParameterData()}"
 	processPendingChanges()
 }
 
 void processPendingChanges()
 {
-log.debug "Processing pending parameter changes. parameterData is: ${getZwaveParameterData()}"
+	if (logEnable) log.debug "Processing pending parameter changes. parameterData is: ${getZwaveParameterData()}"
 
 	getZwaveParameterData().each{ Pkey, parameterInfo ->
 		if (! parameterInfo.pendingChangeValue.is( null ) )
 		{
-			log.debug "Parameters for setParameter are: parameterNumber: ${Pkey as Short}, size: ${parameterInfo.size as Short}, value: ${parameterInfo.pendingChangeValue as BigInteger}."
+			if (logEnable) log.debuglog.debug "Parameters for setParameter are: parameterNumber: ${Pkey as Short}, size: ${parameterInfo.size as Short}, value: ${parameterInfo.pendingChangeValue as BigInteger}."
 			 setParameter((Pkey as Short), (parameterInfo.size as Short), (parameterInfo.pendingChangeValue as BigInteger) ) 
 		 }
 	}
@@ -411,7 +411,7 @@ void getAllParameterValues()
 void setParameter(Short parameterNumber = null, Short size = null, BigInteger value = null){
 	List<hubitat.zwave.Command> cmds=[]
 
-    if (parameterNumber == null || size == null || value == null) {
+    if (parameterNumber.is( null ) || size.is( null ) || value.is( null ) ) {
 		log.warn "Incomplete parameter list supplied... syntax: setParameter(parameterNumber,size,value)"
     } else {
 	    cmds.add(secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: value, parameterNumber: parameterNumber, size: size)))
@@ -895,7 +895,7 @@ void meterSupportedGet()
 	}
 	else
 	{
-	log.debug "Meter Supported Get Function not supported by device ${device.displayName}"
+	if (logEnable) log.debug "Meter Supported Get Function not supported by device ${device.displayName}"
 	}
 }
 void meterReset() {
