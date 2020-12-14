@@ -21,7 +21,7 @@ Map getZwaveParameterData() { return deviceData.get(device.getIdAsLong()).parame
 Map getcentralSceneButtonState() { return getcentralSceneButtonState.get(device.getIdAsLong()) }
 
 metadata {
-	definition (name: "Advanced Zwave Plus Metering Dimmer",namespace: "jvm", author: "jvm") {
+	definition (name: "Advanced Zwave Plus Metering Switch",namespace: "jvm", author: "jvm") {
 		capability "Initialize"
 		// capability "Configuration" // Does the same as Initialize, so don't show the separate control!
 		capability "Refresh"
