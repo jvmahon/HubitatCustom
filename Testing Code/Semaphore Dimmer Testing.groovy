@@ -38,81 +38,7 @@ Map getDeviceMapByFirmware()
 	}
 }
 
-Map getInputControlsForDevice()
-{
-	Map inputControls = getDeviceMapByFirmware().get("inputControls")
-	if (inputControls?.size() > 0) 
-	{
-		log.debug "inputControls of size ${inputControls?.size()} are: " + inputControls
-		return inputControls
-	}
-	else
-	{
-		log.debug "Failed > 0 test, inputControls are of size ${inputControls?.size()}."
 
-		try
-		{
-			openSmartHouseMutex.acquire()
-			List parameterData = getOpenSmartHouseData()
-			inputControls = createInputControls(allParameterData)
-			getDeviceMapByFirmware().put("inputControls", inputControls)
-		}
-		catch (Exception ex)
-		{
-			log.warn "An Error occurred when attempting to get input controls. Error: ${ex}."
-		}
-		finally
-		{
-			openSmartHouseMutex.release()
-			return inputControls
-		}
-	}
-}
-
-List getOpenSmartHouseData()
-{
-	log.debug "Getting data from OpenSmartHouse"
-	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
-	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
-	String deviceID = 		hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceId").toInteger(), 2)
-
-    String DeviceInfoURI = "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/list.php?filter=manufacturer:0x${manufacturer}%20${deviceType}:${deviceID}"
-
-    def mydevice
-    
-    httpGet([uri:DeviceInfoURI])
-    { 
-		resp->
-			mydevice = resp.data.devices.find 
-			{ element ->
-	 
-				Minimum_Version = element.version_min.split("\\.")
-				Maximum_Version = element.version_max.split("\\.")
-				Integer minMainVersion = Minimum_Version[0].toInteger()
-				Integer minSubVersion = Minimum_Version[1].toInteger()
-				Integer maxMainVersion = Maximum_Version[0].toInteger()
-				Integer maxSubVersion =   Maximum_Version[1].toInteger()        
-				if(logEnable) log.debug "state.firmware in getDeviceDataFromDatabase httpGet is ${state.firmware}"
-
-				Boolean aboveMinimumVersion = (state.firmware?.main > minMainVersion) || ((state.firmware?.main == minMainVersion) && (state.firmware?.sub >= minSubVersion))
-			
-				Boolean belowMaximumVersion = (state.firmware?.main < maxMainVersion) || ((state.firmware?.main == maxMainVersion) && (state.firmware?.sub <= maxSubVersion))
-			
-				aboveMinimumVersion && belowMaximumVersion
-			}
-	}
-	log.debug "database id for item is : " + mydevice.id
-    if (! mydevice.id) log.warn "No database entry found for manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}"
-    
-    String queryByDatabaseID= "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/read.php?device_id=${mydevice.id}"    
-    
-	httpGet([uri:queryByDatabaseID])
-        { resp->
-            allParameterData = resp.data.parameters
-        }
-	log.debug "allParameterData for item ${mydevice.id} is: " + allParameterData
-	return allParameterData
-}
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -227,77 +153,81 @@ retrieve a database record that contains a detailed description of the device.
 Since the database records are firmware-dependent, This function 
 should be called AFTER retrieving the device's firmware version using getFirmwareVersionFromDevice().
 */
-void getDeviceDataFromDatabase()
-{
-	if( state.parameterInputs)
-	{
-		if (logEnable) log.debug "Already have parameter data. No need to retrieving again!"
-		return
-	}
 
-	if (txtEnable) log.info "Getting datbase information for device ${device.displayName} from www.opensmarthouse.org Database"
-  
+Map getInputControlsForDevice()
+{
+	Map inputControls = getDeviceMapByFirmware().get("inputControls")
+	if (inputControls?.size() > 0) 
+	{
+		log.debug "inputControls of size ${inputControls?.size()} are: " + inputControls
+		return inputControls
+	}
+	else
+	{
+		log.debug "Failed > 0 test, inputControls are of size ${inputControls?.size()}."
+
+		try
+		{
+			openSmartHouseMutex.acquire()
+			List parameterData = getOpenSmartHouseData()
+			inputControls = createInputControls(allParameterData)
+			getDeviceMapByFirmware().put("inputControls", inputControls)
+		}
+		catch (Exception ex)
+		{
+			log.warn "An Error occurred when attempting to get input controls. Error: ${ex}."
+		}
+		finally
+		{
+			openSmartHouseMutex.release()
+			return inputControls
+		}
+	}
+}
+
+List getOpenSmartHouseData()
+{
+	log.debug "Getting data from OpenSmartHouse"
 	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
 	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
 	String deviceID = 		hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceId").toInteger(), 2)
- 
-    if (logEnable) log.debug " manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}, Version: ${state.firmware.main}, SubVersion: ${state.firmware.sub}"
 
     String DeviceInfoURI = "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/list.php?filter=manufacturer:0x${manufacturer}%20${deviceType}:${deviceID}"
 
     def mydevice
     
     httpGet([uri:DeviceInfoURI])
-    { resp->
-        if(logEnable) log.debug "Response Data: ${resp.data}"
-        if(logEnable) log.debug "Response Data class: ${resp.data instanceof Map}"
+    { 
+		resp->
+			mydevice = resp.data.devices.find 
+			{ element ->
+	 
+				Minimum_Version = element.version_min.split("\\.")
+				Maximum_Version = element.version_max.split("\\.")
+				Integer minMainVersion = Minimum_Version[0].toInteger()
+				Integer minSubVersion = Minimum_Version[1].toInteger()
+				Integer maxMainVersion = Maximum_Version[0].toInteger()
+				Integer maxSubVersion =   Maximum_Version[1].toInteger()        
+				if(logEnable) log.debug "state.firmware in getDeviceDataFromDatabase httpGet is ${state.firmware}"
 
-
-                if(logEnable) log.debug "Response data size is ${resp.data.devices.size()}"
-			    mydevice = resp.data.devices.find { element ->
-		 
-				    Minimum_Version = element.version_min.split("\\.")
-				    Maximum_Version = element.version_max.split("\\.")
-				    Integer minMainVersion = Minimum_Version[0].toInteger()
-				    Integer minSubVersion = Minimum_Version[1].toInteger()
-				    Integer maxMainVersion = Maximum_Version[0].toInteger()
-				    Integer maxSubVersion =   Maximum_Version[1].toInteger()        
-				    if(logEnable) log.debug "state.firmware in getDeviceDataFromDatabase httpGet is ${state.firmware}"
-
-				    Boolean aboveMinimumVersion = (state.firmware?.main > minMainVersion) || ((state.firmware?.main == minMainVersion) && (state.firmware?.sub >= minSubVersion))
-				
-				    Boolean belowMaximumVersion = (state.firmware?.main < maxMainVersion) || ((state.firmware?.main == maxMainVersion) && (state.firmware?.sub <= maxSubVersion))
-				
-				    aboveMinimumVersion && belowMaximumVersion
-			    }
+				Boolean aboveMinimumVersion = (state.firmware?.main > minMainVersion) || ((state.firmware?.main == minMainVersion) && (state.firmware?.sub >= minSubVersion))
+			
+				Boolean belowMaximumVersion = (state.firmware?.main < maxMainVersion) || ((state.firmware?.main == maxMainVersion) && (state.firmware?.sub <= maxSubVersion))
+			
+				aboveMinimumVersion && belowMaximumVersion
+			}
 	}
-
+	log.debug "database id for item is : " + mydevice.id
     if (! mydevice.id) log.warn "No database entry found for manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}"
-    
-    if(logEnable) log.debug "Database Identifier: ${mydevice.id}"  
     
     String queryByDatabaseID= "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/read.php?device_id=${mydevice.id}"    
     
 	httpGet([uri:queryByDatabaseID])
         { resp->
-			if(logEnable) log.debug "Retrieved data for device model: ${resp.data?.label}, Manufacturer: ${resp.data?.manufacturer?.label}"
             allParameterData = resp.data.parameters
         }
-
-	allParameterData.each
-	{
-		getZwaveParameterData().put(it.param_id as Integer, [size:it.size])
-	}
-log.warn "All parameterData is: " + getZwaveParameterData()
-		
-	state.parameterInputs = createInputControls(allParameterData)
-	
-	if (!state.parameterInputs.is(null)) log.info "Successfully retrieved data for device ${device.displayName}"
-	
-    if (logEnable) log.debug newData
-	
-	/** pollDevicesForCurrentValues starts here instead of in initialize() to ensure the state has been updated -- concern is a Hubitat state saving race condition described here: https://community.hubitat.com/t/2-2-4-156-bug-setting-state-variable-race-condition-c7/57893/16
-	*/
+	log.debug "allParameterData for item ${mydevice.id} is: " + allParameterData
+	return allParameterData
 }
 
 Map createInputControls(data)
@@ -402,7 +332,7 @@ void initialize()
 	if (state.firmware.is( null )) state.firmware = getFirmwareForDevice()
     if (state.parameterInputs.is( null )) state.parameterInputs = getInputControlsForDevice()
 	
-	
+/*	
     if (!deviceData.containsKey(device.getIdAsLong()) )
 	{
 	deviceData.put(device.getIdAsLong(), [ZwaveClassMap: [:], parameterData: [:] ])
@@ -419,21 +349,16 @@ void initialize()
     if (logEnable) log.debug "deviceData is: ${deviceData.get( device.getIdAsLong() )}"
 
 
-
+*/
 
   	getZwaveClassVersions()
 	/** The returned command classes are used in zwave.parse, so wait a bit for them to be processed before the next step.
 	*/
-  
-  /**
-  Because of bug in saving state data described here: https://community.hubitat.com/t/2-2-4-156-bug-setting-state-variable-race-condition-c7/57893/16
-  The next functions was moved so its not called from the report handler firmware version handler
-  */
-	// getDeviceDataFromDatabase()
+/*  
 	runIn(60, getCentralSceneInfo)
 	runIn(75, meterSupportedGet)
 	runIn(90,pollDevicesForCurrentValues)
-
+*/
 }
 
 /** Miscellaneous state and device data cleanup tool used during debugging and development
@@ -629,10 +554,6 @@ void getFirmwareVersionFromDevice()
 	{
 		queryForFirmwareReport()
 	}
-	else
-	{
-		getDeviceDataFromDatabase()
-	}
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
@@ -640,7 +561,6 @@ void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
 	if (state.firmware.is(null)) state.firmware = [:]
 	state.put("firmware", [main: cmd.applicationVersion, sub: cmd.applicationSubVersion])
 	if (txtEnable) log.info "Firmware version for device ${device.displayName} is: ${state.get("firmware")}"
-	getDeviceDataFromDatabase()
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {
@@ -648,7 +568,6 @@ void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {
 	if (state.firmware.is(null)) state.firmware = [:]
 	state.put("firmware", [main: cmd.firmware0Version, sub: cmd.firmware0SubVersion])
 	if (txtEnable) log.info "Firmware version for device ${device.displayName} is: ${state.get("firmware")}"
-	getDeviceDataFromDatabase()
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
@@ -656,7 +575,6 @@ void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
 	if (state.firmware.is(null)) state.firmware = [:]
 	state.put("firmware", [main: cmd.firmware0Version, sub: cmd.firmware0SubVersion])
 	if (txtEnable) log.info "Firmware version for device ${device.displayName} is: ${state.get("firmware")}"
-	getDeviceDataFromDatabase()
 }
 
 //////////////////////////////////////////////////////////////////////
