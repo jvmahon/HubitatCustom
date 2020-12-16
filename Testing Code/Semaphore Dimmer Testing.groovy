@@ -11,79 +11,67 @@ getDeviceMapByFirmware returns the main Map data structure containing all the da
 */
 Map getDeviceMapByFirmware()
 {
-		String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
-		String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
-		String deviceID = 		hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceId").toInteger(), 2) 
-		def firmwareMain = 	 	state?.firmware.main
-		def firmwareSub =  	 	state?.firmware.sub
-		if (firmwareMain.is( null) || firmwareSub.is( null ))
-		{
-			log.warn "Unable to getDeviceDataByFirmware for device ${device.displayName} - missing value. Manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}, firmwareMain: ${firmwareMain}, firmwareSub: ${firmwareSub}."
-			// getFirmwareVersion()
-			return null
-		}
-		String key = "${manufacturer}:${deviceType}:${deviceID}:${firmwareMain}:${firmwareSub}"
+	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
+	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
+	String deviceID = 		hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceId").toInteger(), 2) 
+	def firmwareMain = 	 	state?.firmware.main
+	def firmwareSub =  	 	state?.firmware.sub
+	if (firmwareMain.is( null) || firmwareSub.is( null ))
+	{
+		log.warn "Unable to getDeviceDataByFirmware for device ${device.displayName} - missing value. Manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}, firmwareMain: ${firmwareMain}, firmwareSub: ${firmwareSub}."
+		// getFirmwareVersion()
+		return null
+	}
+	String key = "${manufacturer}:${deviceType}:${deviceID}:${firmwareMain}:${firmwareSub}"
 
-		if (deviceSpecificData.containsKey(key)) 
-		{
-			return deviceSpecificData.get(key)
-		}
-		else
-		{
-			try {
-					createDeviceEntryMutex.acquire() // Only allow one writer!
-					// Double-Check to make sure another process didn't create the map first!
-					if (!deviceSpecificData.containsKey(key)) deviceSpecificData.put(key, [:])
-					return deviceSpecificData.get(key)
-				}
-			finally
-				{
-					log.debug "Releasing Semaphore in getDeviceMapByFirmware for device ${device.displayName}."
-					createDeviceEntryMutex.release()
-				}
-		}
-}
-
-Map getDeviceMapByLabel(String label)
-{
-	Map currentMap = getDeviceMapByFirmware()
-	if (!currentMap.containsKey(label)) currentMap.put(label, [:])
-	currentMap = getDeviceMapByFirmware()
-	return currentMap
-}
-
-void putDeviceDataByFirmware( String label, Map dataItem)
-{
-	Map currentData = getDeviceMapByFirmware(label)
-	if (currentData.is( null ) ) 
-		{
-			createEntryByLabel(label)
-			currentData = getDeviceMapByFirmware(label)
-		}
-	currentData.put(label, dataItem)
+	if (deviceSpecificData.containsKey(key)) 
+	{
+		return deviceSpecificData.get(key)
+	}
+	else
+	{
+		// Lock before write and then re-check to be sure another process didn't lock / write first!
+		createDeviceEntryMutex.acquire() 
+		if (!deviceSpecificData.containsKey(key)) deviceSpecificData.put(key, [:])
+		createDeviceEntryMutex.release()
+		return deviceSpecificData.get(key)
+	}
 }
 
 Map getInputControlsForDevice()
 {
-	Map currentMap = getDeviceMapByFirmware()
-	Map inputControls = currentMap.get("inputControls")
-	if (inputControls?.size() > 0) return inputControls
-	// Else, get them!
-	try
+	Map inputControls = getDeviceMapByFirmware().get("inputControls")
+	if (inputControls?.size() > 0) 
 	{
-		openSmartHouseMutex.acquire()
-		Map parameterData = getOpenSmartHouseData()
-		inputControls = createInputControls(parameterData)
-		currentMap.put("inputControls", inputsControls)
+		log.debug "inputControls of size ${inputControls?.size()} are: " + inputControls
+		return inputControls
 	}
-	finally
+	else
 	{
-		openSmartHouseMutex.release()
+		log.debug "Failed > 0 test, inputControls are of size ${inputControls?.size()}."
+
+		try
+		{
+			openSmartHouseMutex.acquire()
+			List parameterData = getOpenSmartHouseData()
+			inputControls = createInputControls(allParameterData)
+			getDeviceMapByFirmware().put("inputControls", inputControls)
+		}
+		catch (Exception ex)
+		{
+			log.warn "An Error occurred when attempting to get input controls. Error: ${ex}."
+		}
+		finally
+		{
+			openSmartHouseMutex.release()
+			return inputControls
+		}
 	}
 }
 
-Map getOpenSmartHouseData()
+List getOpenSmartHouseData()
 {
+	log.debug "Getting data from OpenSmartHouse"
 	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
 	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
 	String deviceID = 		hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceId").toInteger(), 2)
@@ -113,7 +101,7 @@ Map getOpenSmartHouseData()
 				aboveMinimumVersion && belowMaximumVersion
 			}
 	}
-
+	log.debug "database id for item is : " + mydevice.id
     if (! mydevice.id) log.warn "No database entry found for manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}"
     
     String queryByDatabaseID= "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/read.php?device_id=${mydevice.id}"    
@@ -122,6 +110,7 @@ Map getOpenSmartHouseData()
         { resp->
             allParameterData = resp.data.parameters
         }
+	log.debug "allParameterData for item ${mydevice.id} is: " + allParameterData
 	return allParameterData
 }
 
@@ -191,6 +180,8 @@ metadata {
 			
 			command "meterRefresh"
 			command "batteryGet"
+			
+			command "test"
         // The following is for debugging. In final code, it can be removed!
     	// command "getDeviceDataFromDatabase"
 		
@@ -223,6 +214,10 @@ metadata {
     }
 }
 
+void test()
+{
+log.debug "Result in test of getInputControlsForDevice is: " + getInputControlsForDevice()
+}
 /*
 //////////////////////////////////////////////////////////////////////
 //////      Get Device's Database Information Version          ///////
@@ -391,8 +386,23 @@ void ResetDriverStateData()
 	state.clear()
 }
 
+Map getFirmwareForDevice()
+{
+log.debug "getFirmwareForDevice is currently a dummy function always returning 5.14"
+return [main:5, sub:14]
+}
 void initialize()
 {
+	if (state.driverVersion != driverVersion)
+	{
+		ResetDriverStateData()
+		state.driverVersion = driverVersion
+	}
+	
+	if (state.firmware.is( null )) state.firmware = getFirmwareForDevice()
+    if (state.parameterInputs.is( null )) state.parameterInputs = getInputControlsForDevice()
+	
+	
     if (!deviceData.containsKey(device.getIdAsLong()) )
 	{
 	deviceData.put(device.getIdAsLong(), [ZwaveClassMap: [:], parameterData: [:] ])
@@ -408,18 +418,12 @@ void initialize()
 	
     if (logEnable) log.debug "deviceData is: ${deviceData.get( device.getIdAsLong() )}"
 
-	if (state.driverVersion != driverVersion)
-	{
-		ResetDriverStateData()
-		state.driverVersion = driverVersion
-	}
-	
-    if (state.parameterInputs.is(null)) state.parameterInputs =[:]
+
+
 
   	getZwaveClassVersions()
 	/** The returned command classes are used in zwave.parse, so wait a bit for them to be processed before the next step.
 	*/
-	runIn(45, getFirmwareVersionFromDevice) // sets the firmware version in state.firmware[main: ??,sub: ??]
   
   /**
   Because of bug in saving state data described here: https://community.hubitat.com/t/2-2-4-156-bug-setting-state-variable-race-condition-c7/57893/16
