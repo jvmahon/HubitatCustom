@@ -5,6 +5,7 @@ import groovy.transform.Field
 @Field static  ConcurrentHashMap<Long, Map> deviceSpecificData = new ConcurrentHashMap<String, Map>()
 @Field static Semaphore createDeviceEntryMutex = new Semaphore(1)
 @Field static Semaphore firmwareMutex = new Semaphore(1)
+@Field static Semaphore openSmartHouseMutex = new Semaphore(1)
 
 /**
 getDeviceMapByFirmware returns the main Map data structure containing all the data gathered for the particular device type and firmware version. The data may have been gathered by any of the drivers!
