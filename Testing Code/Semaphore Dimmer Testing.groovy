@@ -254,6 +254,12 @@ List getOpenSmartHouseData()
         { resp->
             allParameterData = resp.data.parameters
         }
+		
+	allParameterData.each
+	{
+		getZwaveParameterData().put(it.param_id as Integer, [size:it.size])
+	}
+	
 	log.debug "allParameterData for item ${mydevice.id} is: " + allParameterData
 	return allParameterData
 }
