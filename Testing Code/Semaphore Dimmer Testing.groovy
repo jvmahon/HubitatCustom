@@ -1,4 +1,4 @@
-@Field static  Integer driverVersion = 2
+@Field static  Integer driverVersion = 3
 import java.util.concurrent.*;
 import groovy.transform.Field
 
@@ -324,6 +324,7 @@ void refresh() {
     List<hubitat.zwave.Command> cmds=[]
 	cmds.add(zwave.basicV1.basicGet())
     sendToDevice(cmds)
+	meterRefresh()
 }
 
 void installed()
@@ -359,8 +360,9 @@ void initialize()
 	setIsDigitalEvent( false )
 	getDeviceMapByNetworkID().put("centralSceneButtonState", [:]) // clear and initialize state info.
 	
-	runIn(1, getCentralSceneInfo)
-	runIn(3, meterSupportedGet)
+	getCentralSceneInfo()
+	meterSupportedGet()
+	runIn(3, refresh)
 }
 
 /** Miscellaneous state and device data cleanup tool used during debugging and development
@@ -675,7 +677,7 @@ Map   getZwaveClassVersionMap(){
 	if( getDeviceMapForProduct().get("ZwaveClassVersions").is (null )) getDeviceMapForProduct().put("ZwaveClassVersions", [:])
 	Map classVersions = getDeviceMapForProduct().get("ZwaveClassVersions")
 	
-	if ((classVersions?.size() > 0) && (classVersions?.size() == deviceInclusters.size()))
+	if ((classVersions?.size() > 0) && (classVersions?.size() >= deviceInclusters.size()))
 	{
 		log.debug "Already collected all classes: " + classVersions
 		return classVersions
@@ -729,7 +731,14 @@ void zwaveEvent(hubitat.zwave.commands.versionv3.VersionCommandClassReport cmd) 
 
 void processVersionCommandClassReport (cmd) {
 	Map classVersions = getDeviceMapForProduct().get("ZwaveClassVersions")
-	classVersions.put(cmd.requestedCommandClass as Integer, cmd.commandClassVersion as Integer)
+	if (classVersions.containsKey(cmd.requestedCommandClass as Integer))
+	{
+		classVersions.replace(cmd.requestedCommandClass as Integer, cmd.commandClassVersion as Integer)
+	}
+	else
+	{
+		classVersions.put(cmd.requestedCommandClass as Integer, cmd.commandClassVersion as Integer)
+	}
 	classVersionMutex.release(1)
 
 }
@@ -973,6 +982,13 @@ void meterReset() {
 }
 
 void meterRefresh() {
+
+	if (getZwaveClassVersionMap().get(50 as Integer).is( null ))
+	{
+		if (logEnable) log.debug "Device ${device.displayName} does not support metering. No Meter Refresh performed."
+		return
+	}
+
     if (txtEnable) log.info "${device.label?device.label:device.name}: refresh()"
 	
 	List<hubitat.zwave.Command> cmds = []
