@@ -34,7 +34,7 @@ Map getDeviceMapForProduct()
 	else
 	{
 		// Lock before write and then re-check to be sure another process didn't lock / write first!
-		createDeviceEntryMutex.acquire() 
+		createDeviceEntryMutex.tryAcquire(1, 5, TimeUnit.SECONDS )
 		if (!deviceSpecificData.containsKey(key)) deviceSpecificData.put(key, [:])
 		createDeviceEntryMutex.release()
 		return deviceSpecificData.get(key)
@@ -52,12 +52,20 @@ Map getDeviceMapByNetworkID()
 	else
 	{
 		// Lock before write and then re-check to be sure another process didn't lock / write first!
-		createDeviceEntryMutex.acquire() 
+		createDeviceEntryMutex.tryAcquire(1, 5, TimeUnit.SECONDS )
 		if (!deviceSpecificData.containsKey(key)) deviceSpecificData.put(key, [:])
 		createDeviceEntryMutex.release()
 		return deviceSpecificData.get(key)
 	}
 }
+
+Map getZwaveParameterData() 
+{ 
+	Map thisDevice = getDeviceMapByNetworkID()
+	if (!thisDevice.containsKey("parameterData")) thisDevice.put("parameterData", [:])
+	return thisDevice.get("parameterData")
+} 
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -77,7 +85,7 @@ void setIsDigitalEvent(Boolean value) {
 		{EventTypeIsDigital.replace(device.getIdAsLong(), value) }
 			else {EventTypeIsDigital.replace(device.getIdAsLong(), value) }
 	}
-Map getZwaveParameterData() { return deviceData.get(device.getIdAsLong())?.parameterData } 
+
 Map getcentralSceneButtonState() { return centralSceneButtonState.get(device.getIdAsLong()) }
 
 void putcentralSceneButtonState(Integer button, String state)
@@ -188,7 +196,7 @@ Map getInputControlsForDevice()
 
 		try
 		{
-			openSmartHouseMutex.acquire()
+			openSmartHouseMutex.tryAcquire(1, 5, TimeUnit.SECONDS )
 			List parameterData = getOpenSmartHouseData()
 			inputControls = createInputControls(allParameterData)
 			getDeviceMapForProduct().put("inputControls", inputControls)
@@ -354,7 +362,7 @@ void initialize()
 	state.firmware = getFirmwareVersion()
 	state.parameterInputs = getInputControlsForDevice()
 	state.ZwaveClassVersions = getZwaveClassVersionMap()
-
+	getAllParameterValues()
 
 	
 /*
@@ -376,7 +384,6 @@ void initialize()
 /*  
 	runIn(60, getCentralSceneInfo)
 	runIn(75, meterSupportedGet)
-	runIn(90,pollDevicesForCurrentValues)
 */
 }
 
@@ -477,6 +484,8 @@ void getParameterValue(parameterNumber)
 
 void getAllParameterValues()
 {
+log.debug "Getting all parameter values. Current status of parameter data is: " + getZwaveParameterData()
+
     List<hubitat.zwave.Command> cmds=[]	
 	getZwaveParameterData().each{k, v ->
 	 	if (logEnable) log.debug "Getting value of parameter ${k}"
@@ -506,12 +515,6 @@ void setParameter(Short parameterNumber = null, Short size = null, BigInteger va
     }
 	if (cmds) sendToDevice(cmds)
 
-}
-
-void pollDevicesForCurrentValues()
-{ 	// On startup, poll all the devices for their initial values!
-	log.info "Getting current values of all device parameters."
-	getAllParameterValues()
 }
 
 
@@ -560,7 +563,7 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
 
 Map getFirmwareVersion()
 {
-	firmwareMutex.acquire(1)
+	firmwareMutex.tryAcquire(1, 5, TimeUnit.SECONDS )
 
 	Map thisDeviceInfo = getDeviceMapByNetworkID()
 	if (! thisDeviceInfo.containsKey("firmware")) 
@@ -573,7 +576,7 @@ Map getFirmwareVersion()
 		
 		// When the firmware report handler is done it will release firmwareMutex
 		// Thus, this next acquire causes a wait 5 seconds until the report is received and processed
-		firmwareMutex.tryAcquire(5, TimeUnit.SECONDS )
+		firmwareMutex.tryAcquire(1, 5, TimeUnit.SECONDS )
 	}
 	firmwareMutex.release(1)
 	return thisDeviceInfo.get("firmware")
@@ -708,7 +711,7 @@ Map   getZwaveClassVersionMap(){
 		try
 		{
 			deviceInclusters.each {
-				classVersionMutex.acquire()
+				classVersionMutex.tryAcquire(1, 5, TimeUnit.SECONDS )
 				log.debug "Process for class version: " + it
 				if (!classVersions.containsKey(it as Integer)) 
 					{
@@ -717,7 +720,7 @@ Map   getZwaveClassVersionMap(){
 						if(cmds) sendToDevice(cmds)
 					}
 			}
-			classVersionMutex.acquire(2)
+			classVersionMutex.tryAcquire(2, 5, TimeUnit.SECONDS )
 			log.debug "Storing classes: " + classVersions
 			getDeviceMapForProduct().put("ZwaveClassVersions", classVersions)
 			classVersionMutex.release(2)
