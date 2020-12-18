@@ -6,17 +6,19 @@ import groovy.transform.Field
 @Field static Semaphore createDeviceEntryMutex = new Semaphore(1)
 @Field static Semaphore firmwareMutex = new Semaphore(1)
 @Field static Semaphore openSmartHouseMutex = new Semaphore(1)
+@Field static Semaphore classVersionMutex = new Semaphore(2)
 
 /**
-getDeviceMapByFirmware returns the main Map data structure containing all the data gathered for the particular device type and firmware version. The data may have been gathered by any of the drivers!
+getDeviceMapForProduct returns the main Map data structure containing all the data gathered for the particular Product and firmware version. The data may have been gathered by any of the drivers!
 */
-Map getDeviceMapByFirmware()
+Map getDeviceMapForProduct()
 {
 	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
 	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
 	String deviceID = 		hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceId").toInteger(), 2) 
-	def firmwareMain = 	 	state?.firmware.main
-	def firmwareSub =  	 	state?.firmware.sub
+	Map deviceFirmware = getFirmwareVersion()
+	Integer firmwareMain = 	 	deviceFirmware.main as Integer
+	Integer firmwareSub =  	 	deviceFirmware.sub as Integer
 	if (firmwareMain.is( null) || firmwareSub.is( null ))
 	{
 		log.warn "Unable to getDeviceDataByFirmware for device ${device.displayName} - missing value. Manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}, firmwareMain: ${firmwareMain}, firmwareSub: ${firmwareSub}."
@@ -56,6 +58,7 @@ Map getDeviceMapByNetworkID()
 		return deviceSpecificData.get(key)
 	}
 }
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -74,7 +77,6 @@ void setIsDigitalEvent(Boolean value) {
 		{EventTypeIsDigital.replace(device.getIdAsLong(), value) }
 			else {EventTypeIsDigital.replace(device.getIdAsLong(), value) }
 	}
-Map getZwaveClassMap() { return deviceData.get(device.getIdAsLong()).ZwaveClassMap }
 Map getZwaveParameterData() { return deviceData.get(device.getIdAsLong())?.parameterData } 
 Map getcentralSceneButtonState() { return centralSceneButtonState.get(device.getIdAsLong()) }
 
@@ -174,7 +176,7 @@ should be called AFTER retrieving the device's firmware version using getFirmwar
 
 Map getInputControlsForDevice()
 {
-	Map inputControls = getDeviceMapByFirmware().get("inputControls")
+	Map inputControls = getDeviceMapForProduct().get("inputControls")
 	if (inputControls?.size() > 0) 
 	{
 		log.debug "inputControls of size ${inputControls?.size()} are: " + inputControls
@@ -189,7 +191,7 @@ Map getInputControlsForDevice()
 			openSmartHouseMutex.acquire()
 			List parameterData = getOpenSmartHouseData()
 			inputControls = createInputControls(allParameterData)
-			getDeviceMapByFirmware().put("inputControls", inputControls)
+			getDeviceMapForProduct().put("inputControls", inputControls)
 		}
 		catch (Exception ex)
 		{
@@ -350,15 +352,12 @@ void initialize()
 	}
 	
 	state.firmware = getFirmwareVersion()
-	log.debug "Firmware Version in Initialize is: " + getFirmwareVersion()
-    if (state.parameterInputs.is( null )) state.parameterInputs = getInputControlsForDevice()
+	state.parameterInputs = getInputControlsForDevice()
+	state.ZwaveClassVersions = getZwaveClassVersionMap()
+
+
 	
-	
-/*	
-    if (!deviceData.containsKey(device.getIdAsLong()) )
-	{
-	deviceData.put(device.getIdAsLong(), [ZwaveClassMap: [:], parameterData: [:] ])
-	}
+/*
 	if (! centralSceneButtonState.containsKey(device.getIdAsLong()))
 	{
 	    centralSceneButtonState.put(device.getIdAsLong(), [:])
@@ -373,9 +372,7 @@ void initialize()
 
 */
 
-  	// getZwaveClassVersions()
-	/** The returned command classes are used in zwave.parse, so wait a bit for them to be processed before the next step.
-	*/
+
 /*  
 	runIn(60, getCentralSceneInfo)
 	runIn(75, meterSupportedGet)
@@ -565,8 +562,6 @@ Map getFirmwareVersion()
 {
 	firmwareMutex.acquire(1)
 
-	if (logEnable) log.debug "Querying for firmware report"
-	
 	Map thisDeviceInfo = getDeviceMapByNetworkID()
 	if (! thisDeviceInfo.containsKey("firmware")) 
 	{
@@ -579,18 +574,16 @@ Map getFirmwareVersion()
 		// When the firmware report handler is done it will release firmwareMutex
 		// Thus, this next acquire causes a wait 5 seconds until the report is received and processed
 		firmwareMutex.tryAcquire(5, TimeUnit.SECONDS )
-		// firmwareMutex.acquire()
 	}
 	firmwareMutex.release(1)
 	return thisDeviceInfo.get("firmware")
-
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
     if (logEnable) log.debug "For ${device.displayName}, Received V1 version report: ${cmd}"
 	firmwareInfo = getDeviceMapByNetworkID().get("firmware")	
-	firmwareInfo.put("main",cmd.applicationVersion )
-	firmwareInfo.put("sub", cmd.applicationSubVersion)
+	firmwareInfo.put("main",cmd.applicationVersion as Integer)
+	firmwareInfo.put("sub", cmd.applicationSubVersion as Integer)
 	firmwareMutex.release(1)	
 
 }
@@ -598,17 +591,16 @@ void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
 void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {
     if (logEnable) log.debug "For ${device.displayName}, Received V2 version report: ${cmd}"
 	firmwareInfo = getDeviceMapByNetworkID().get("firmware")	
-	firmwareInfo.put("main",cmd.firmware0Version )
-	firmwareInfo.put("sub", cmd.firmware0SubVersion)
+	firmwareInfo.put("main",cmd.firmware0Version  as Integer)
+	firmwareInfo.put("sub", cmd.firmware0SubVersion as Integer)
 	firmwareMutex.release(1)	
-
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
     if (logEnable) log.debug "For ${device.displayName}, Received V2 version report: ${cmd}"
 	firmwareInfo = getDeviceMapByNetworkID().get("firmware")	
-	firmwareInfo.put("main",cmd.firmware0Version )
-	firmwareInfo.put("sub", cmd.firmware0SubVersion)
+	firmwareInfo.put("main",cmd.firmware0Version  as Integer)
+	firmwareInfo.put("sub", cmd.firmware0SubVersion as Integer)
 	firmwareMutex.release(1)
 }
 
@@ -695,45 +687,53 @@ void zwaveEvent(hubitat.zwave.Command cmd) {
 	0x86:3, (134) // version V1, Max is 3
 */
 
-Integer   getZwaveClassVersions(){
-    List<hubitat.zwave.Command> cmds = []
-	Integer getItems = 0
-	
-	if(logEnable) log.debug "Current Command Class version state is: ${state.ZwaveClassVersions}, and concurrent map is: ${getZwaveClassMap()}."
-	
-	// All the inclusters suppored by the device
-	List<Integer> deviceInclusters = getDataValue("inClusters").split(",").collect{ hexStrToUnsignedInt(it) as Integer }
-		deviceInclusters << 32
-	
-	// The next list is the classes actually used by this driver. We only need info. on those classes!
-	List<Integer> driverInclusters = [0x20, 0x25, 0x26, 0x32, 0x5B, 0x6C, 0x70, 0x86]
 
-    driverInclusters.each {
+Map   getZwaveClassVersionMap(){
+	// All the inclusters suppored by the device
+	List<Integer> 	deviceInclusters = getDataValue("inClusters").split(",").collect{ hexStrToUnsignedInt(it) as Integer }
+					deviceInclusters << 32
+			
+	if( getDeviceMapForProduct().get("ZwaveClassVersions").is (null )) getDeviceMapForProduct().put("ZwaveClassVersions", [:])
+	Map classVersions = getDeviceMapForProduct().get("ZwaveClassVersions")
 	
-	if (deviceInclusters.contains(it)) 
+	if ((classVersions?.size() > 0) && (classVersions?.size() == deviceInclusters.size()))
+	{
+		log.debug "Already collected all classes: " + classVersions
+		return classVersions
+	}
+	else
+	{
+		log.debug "Retrieving class versions for device ${device.displayName}. Need: ${deviceInclusters.size()}, Have: ${classVersions?.size()}."
+
+		try
 		{
-			Integer thisClass = it as Integer
-			
-			def zwaveClass = state.ZwaveClassVersions?.get(thisClass as String)
-			
-			if ( zwaveClass.is( null) )
-			{
-				getItems += 1
-				if(logEnable) log.debug "Requesting Command class version for class 0x${intToHexStr(it)}"
-				// gets are the same in all command class versions
-				cmds.add(zwave.versionV3.versionCommandClassGet(requestedCommandClass:it.toInteger()))
+			deviceInclusters.each {
+				classVersionMutex.acquire()
+				log.debug "Process for class version: " + it
+				if (!classVersions.containsKey(it as Integer)) 
+					{
+						List<hubitat.zwave.Command> cmds = []
+						cmds.add(zwave.versionV3.versionCommandClassGet(requestedCommandClass:it.toInteger()))
+						if(cmds) sendToDevice(cmds)
+					}
 			}
-			else
-			{
-				getZwaveClassMap().put(thisClass as Integer, zwaveClass as Integer)
-			}
+			classVersionMutex.acquire(2)
+			log.debug "Storing classes: " + classVersions
+			getDeviceMapForProduct().put("ZwaveClassVersions", classVersions)
+			classVersionMutex.release(2)
 		}
-    }
-	if(logEnable) log.debug "Getting ${getItems} command versions which were previously not retrieved."
-	
-    if(cmds) sendToDevice(cmds)
-	return getItems
+		catch (Exception ex)
+		{
+			log.warn "An Error occurred when attempting to get input controls. Error: ${ex}."
+		}
+		finally
+		{
+			classVersionMutex.release(2)
+			return classVersions
+		}
+	}
 }
+
 
 // There are 3 versions of command class reports - could just include only the highest and let Groovy resolve!
 void zwaveEvent(hubitat.zwave.commands.versionv1.VersionCommandClassReport cmd) {
@@ -749,16 +749,9 @@ void zwaveEvent(hubitat.zwave.commands.versionv3.VersionCommandClassReport cmd) 
 }
 
 void processVersionCommandClassReport (cmd) {
-
-	if (getZwaveClassMap().containsKey(cmd.requestedCommandClass as Integer) )
-	{
-		getZwaveClassMap().replace(cmd.requestedCommandClass as Integer, cmd.commandClassVersion as Integer)
-	}
-	else
-	{
-		getZwaveClassMap().put(cmd.requestedCommandClass as Integer, cmd.commandClassVersion as Integer)
-	}
-	state.ZwaveClassVersions = getZwaveClassMap()
+	Map classVersions = getDeviceMapForProduct().get("ZwaveClassVersions")
+	classVersions.put(cmd.requestedCommandClass as Integer, cmd.commandClassVersion as Integer)
+	classVersionMutex.release(1)
 
 }
 
@@ -977,7 +970,7 @@ void ProcessCCReport(cmd) {
 
 void meterSupportedGet()
 {
-	if (device.getDataValue("inClusters").contains("0x32") && (getZwaveClassMap().get(50 as Integer) != 1) )
+	if (device.getDataValue("inClusters").contains("0x32") && (getZwaveClassVersionMap().get(50 as Integer) != 1) )
 	{
 		if (state.meterTypesSupported.is( null ))
 		{
@@ -1005,7 +998,7 @@ void meterRefresh() {
 	
 	List<hubitat.zwave.Command> cmds = []
 
-	if (getZwaveClassMap().get(50 as Integer) == 1)
+	if (getZwaveClassVersionMap().get(50 as Integer) == 1)
 	{
 		cmds << zwave.meterV1.meterGet()
 	}
@@ -1298,7 +1291,7 @@ void setLevel(level, duration = 0)
 		sendEvent(name: "switch", value: "off", descriptionText: "Device ${device.displayName} remains at off", type: "digital", isStateChange: stateChange )
 		
 			List<hubitat.zwave.Command> cmds = []
-			if (getZwaveClassMap().get(38 as Integer) == 1)
+			if (getZwaveClassVersionMap().get(38 as Integer) == 1)
 			{
 				cmds.add(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: 0)))
 				log.warn "${device.displayName} does not support dimming duration settting command. Defaulting to dimming duration set by device parameters."
@@ -1312,7 +1305,7 @@ void setLevel(level, duration = 0)
 	
 	if (device.hasCapability("SwitchLevel")) {		
 		List<hubitat.zwave.Command> cmds = []
-			if (getZwaveClassMap().get(38 as Integer) < 1)
+			if (getZwaveClassVersionMap().get(38 as Integer) < 1)
 			{
 				cmds.add(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: level)))
 				log.warn "${device.displayName} does not support dimming duration settting command. Defaulting to dimming duration set by device parameters."
