@@ -7,6 +7,7 @@ import groovy.transform.Field
 @Field static Semaphore firmwareMutex = new Semaphore(1)
 @Field static Semaphore openSmartHouseMutex = new Semaphore(1)
 @Field static Semaphore classVersionMutex = new Semaphore(2)
+@Field static Semaphore waitForMe = new Semaphore(1)
 
 /**
 getDeviceMapForProduct returns the main Map data structure containing all the data gathered for the particular Product and firmware version. The data may have been gathered by any of the drivers!
@@ -79,24 +80,15 @@ Map getZwaveParameterData()
 
 @Field static  ConcurrentHashMap<Long, Map> 		deviceData = new ConcurrentHashMap<Long, Map>();
 
-Boolean isDigitalEvent() { return EventTypeIsDigital.get(device.getIdAsLong()) as Boolean }
-void setIsDigitalEvent(Boolean value) { 
-	if (EventTypeIsDigital.containsKey(device.getIdAsLong()) ) 
-		{EventTypeIsDigital.replace(device.getIdAsLong(), value) }
-			else {EventTypeIsDigital.replace(device.getIdAsLong(), value) }
-	}
+Boolean isDigitalEvent() { return getDeviceMapByNetworkID().get("EventTypeIsDigital") as Boolean }
+void setIsDigitalEvent(Boolean value) { getDeviceMapByNetworkID().put("EventTypeIsDigital", value as Boolean)}
 
-Map getcentralSceneButtonState() { return centralSceneButtonState.get(device.getIdAsLong()) }
+Map getcentralSceneButtonState() { return getDeviceMapByNetworkID().get("centralSceneButtonState") }
 
 void putcentralSceneButtonState(Integer button, String state)
 {
-	Map centralScene = centralSceneButtonState?.get(device.getIdAsLong())
-	if (centralScene.is( null ) )
-	{
-		centralSceneButtonState.put(device.getIdAsLong(), [:])
-		centralScene = centralSceneButtonState.get(device.getIdAsLong())
-	}
-	centralScene.put(button, state)
+	Map centralScene = 	getDeviceMapByNetworkID().get("centralSceneButtonState").put(button, state)
+	if (logEnable) log.debug "Put button state value ${centralScene} into centralSceneButtonState for device ${device.displayName}"
 }
 
 metadata {
@@ -351,11 +343,6 @@ void ResetDriverStateData()
 	state.clear()
 }
 
-Map getFirmwareForDevice()
-{
-log.debug "getFirmwareForDevice is currently a dummy function always returning 5.14"
-return [main:255, sub:255]
-}
 
 void initialize()
 {
@@ -369,28 +356,11 @@ void initialize()
 	state.parameterInputs = getInputControlsForDevice()
 	state.ZwaveClassVersions = getZwaveClassVersionMap()
 	getAllParameterValues()
-
+	setIsDigitalEvent( false )
+	getDeviceMapByNetworkID().put("centralSceneButtonState", [:]) // clear and initialize state info.
 	
-/*
-	if (! centralSceneButtonState.containsKey(device.getIdAsLong()))
-	{
-	    centralSceneButtonState.put(device.getIdAsLong(), [:])
-	}
-	if (! EventTypeIsDigital.containsKey(device.getIdAsLong()) )
-	{
-		EventTypeIsDigital.put(device.getIdAsLong(), false )
-	}
-	
-    if (logEnable) log.debug "deviceData is: ${deviceData.get( device.getIdAsLong() )}"
-
-
-*/
-
-
-/*  
-	runIn(60, getCentralSceneInfo)
-	runIn(75, meterSupportedGet)
-*/
+	runIn(1, getCentralSceneInfo)
+	runIn(3, meterSupportedGet)
 }
 
 /** Miscellaneous state and device data cleanup tool used during debugging and development
@@ -992,7 +962,7 @@ void meterSupportedGet()
 	}
 	else
 	{
-	if (logEnable) log.debug "Meter Supported Get Function not supported by device ${device.displayName}"
+	if (logEnable) log.debug "Device ${device.displayName} does not support energy meter function."
 	}
 }
 void meterReset() {
