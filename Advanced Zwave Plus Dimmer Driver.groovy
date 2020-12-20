@@ -561,21 +561,33 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
 
 Map getFirmwareVersion()
 {
-	Boolean locked = firmwareMutex.tryAcquire(1, 15, TimeUnit.SECONDS )
+	String thisDeviceID = "${device.getDeviceNetworkId()}"
 	
-	if (! firmwareStore.containsKey("${device.getDeviceNetworkId()}")) 
-	{
-		sendToDevice(zwave.versionV1.versionGet())
-	
-		// When the firmware report handler is done it will release firmwareMutex
-		// Thus, this next acquire causes a wait 5 seconds until the report is received and processed
-		Boolean locked2 = firmwareMutex.tryAcquire(1, 10, TimeUnit.SECONDS )
-		// if (logEnable) log.debug "Getfirmware locked #2: ${locked}."
-		firmwareMutex.release()
+	if (firmwareStore.containsKey(thisDeviceID)) {
+		return firmwareStore.get(thisDeviceID)
+	} else if (state.firmwareVersion) {
+		log.info "For device ${device.displayName}, Loading firmware version from state.firmwareVersion which has value: ${state.firmwareVersion}."
+		firmwareStore.put(thisDeviceID, [main: (state.firmwareVersion.main as Integer), sub: (state.firmwareVersion.sub as Integer)])
+		return firmwareStore.get(thisDeviceID)
 	} else {
-		firmwareMutex.release()
+		Boolean locked = firmwareMutex.tryAcquire(1, 15, TimeUnit.SECONDS )
+		if (locked == false)
+		{
+			log.warn "Timed out getting lock to retrieve firmware version for device ${device.displayName}. Try restarting Hubitat."
+		}		
+		sendToDevice(zwave.versionV1.versionGet())
+		
+		// When the firmware report handler is done it will release firmwareMutex lock
+		// Thus, this next acquire causes effects a wait 10 seconds until the report is received and processed
+		Boolean locked2 = firmwareMutex.tryAcquire(1, 10, TimeUnit.SECONDS )
+		if (locked2 == false)
+		{
+			log.warn "Possible processing error getting firmware report for device ${device.displayName}. Didn't get a response in time. Try restarting Hubitat."
 		}
-	return firmwareStore.get("${device.getDeviceNetworkId()}")
+		firmwareMutex.release()
+			
+		return firmwareStore.get(thisDeviceID)
+	}
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
