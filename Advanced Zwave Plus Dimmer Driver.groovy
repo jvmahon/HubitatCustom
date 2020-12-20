@@ -1,4 +1,4 @@
-@Field static  Integer driverVersion = 4
+@Field static  Integer driverVersion = 5
 import java.util.concurrent.*;
 import groovy.transform.Field
 
@@ -592,7 +592,7 @@ Map getFirmwareVersion()
 
 void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
 	cmd.firmware0Version = cmd.applicationVersion as Integer
-	firmware0SubVersion = cmd.applicationSubVersion as Integer
+	cmd.firmware0SubVersion = cmd.applicationSubVersion as Integer
 	processFirmwareReport(cmd)	
 }
 
