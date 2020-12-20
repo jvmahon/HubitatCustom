@@ -56,12 +56,6 @@ synchronized Map getDeviceMapByNetworkID()
 	}
 }
 
-Map getZwaveParameterData() 
-{ 
-	Map thisDevice = getDeviceMapByNetworkID()
-	if (!thisDevice.containsKey("parameterData")) thisDevice.put("parameterData", [:])
-	return thisDevice.get("parameterData")
-} 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -387,6 +381,21 @@ void logsOff(){
     device.updateSetting("logEnable",[value:"false",type:"bool"])
 }
 
+////////////////////////////////////////////////////////////////////////
+/////////////      Parameter Updating and Management      /////////////
+////////////////////////////////////////////////////////////////////////
+
+@Field static  ConcurrentHashMap<String, Map> allParameterDataStorage = new ConcurrentHashMap<String, Map>()
+
+Map getZwaveParameterData() 
+{ 
+	String key = device.getDeviceNetworkId()
+	if (!allParameterDataStorage.containsKey(key)) allParameterDataStorage.put(key, [:])
+	Map thisDeviceParameters = allParameterDataStorage.get(key)
+	return thisDeviceParameters
+} 
+
+
 void updated()
 {
 	if (txtEnable) log.info "Updating changed parameters . . ."
@@ -400,7 +409,8 @@ void updated()
 	so values are accessed as v.[input:[defaultValue:0, name:configParam004, options:[0:Normal, 1:Inverted], description:Controls the on/off orientation of the rocker switch, title:(4) Orientation, type:enum]]
 	*/
 	def integerSettings = [:]
-	state.parameterInputs?.each { Pkey , Pvalue -> 
+	//state.parameterInputs?.each { Pkey , Pvalue -> 	
+	getInputControlsForDevice().each { Pkey , Pvalue -> 
 		
 		if( settings.containsKey(Pvalue.name))
 		{
@@ -1404,4 +1414,3 @@ void release(button){
 void doubleTap(button){
     sendButtonEvent("doubleTapped", button, "digital")
 }
-
