@@ -1,10 +1,8 @@
-@Field static  Integer driverVersion = 5
+@Field static  Integer driverVersion = 6
 import java.util.concurrent.*;
 import groovy.transform.Field
 
 @Field static  ConcurrentHashMap<Long, Map> deviceSpecificData = new ConcurrentHashMap<String, Map>()
-// @Field static Semaphore createDeviceEntryMutex = new Semaphore(1)
-// @Field static Semaphore openSmartHouseMutex = new Semaphore(1)
 
 @Field static Semaphore waitForMe = new Semaphore(1)
 
@@ -108,7 +106,7 @@ metadata {
 			command "doubleTap", ["NUMBER"]
 			
 			command "meterRefresh"
-			// command "batteryGet"
+			command "batteryGet"
 			
 			// command "test"
 			// command "getFirmwareVersion"
@@ -559,18 +557,19 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
 @Field static Semaphore firmwareMutex = new Semaphore(1)
 @Field static  ConcurrentHashMap<String, Map> firmwareStore = new ConcurrentHashMap<String, Map>()
 
+
 Map getFirmwareVersion()
 {
-	String thisDeviceID = "${device.getDeviceNetworkId()}"
+	// String thisDeviceID = "${device.getDeviceNetworkId()}"
 	
-	if (firmwareStore.containsKey(thisDeviceID)) {
-		return firmwareStore.get(thisDeviceID)
+	if (firmwareStore.containsKey("${device.getDeviceNetworkId()}")) {
+		return firmwareStore.get("${device.getDeviceNetworkId()}")
 	} else if (state.firmwareVersion) {
 		log.info "For device ${device.displayName}, Loading firmware version from state.firmwareVersion which has value: ${state.firmwareVersion}."
-		firmwareStore.put(thisDeviceID, [main: (state.firmwareVersion.main as Integer), sub: (state.firmwareVersion.sub as Integer)])
-		return firmwareStore.get(thisDeviceID)
+		firmwareStore.put("${device.getDeviceNetworkId()}", [main: (state.firmwareVersion.main as Integer), sub: (state.firmwareVersion.sub as Integer)])
+		return firmwareStore.get("${device.getDeviceNetworkId()}")
 	} else {
-		Boolean locked = firmwareMutex.tryAcquire(1, 15, TimeUnit.SECONDS )
+		Boolean locked = firmwareMutex.tryAcquire(1, 20, TimeUnit.SECONDS )
 		if (locked == false)
 		{
 			log.warn "Timed out getting lock to retrieve firmware version for device ${device.displayName}. Try restarting Hubitat."
@@ -579,34 +578,32 @@ Map getFirmwareVersion()
 		
 		// When the firmware report handler is done it will release firmwareMutex lock
 		// Thus, this next acquire causes effects a wait 10 seconds until the report is received and processed
-		Boolean locked2 = firmwareMutex.tryAcquire(1, 10, TimeUnit.SECONDS )
+		Boolean locked2 = firmwareMutex.tryAcquire(1, 15, TimeUnit.SECONDS )
 		if (locked2 == false)
 		{
 			log.warn "Possible processing error getting firmware report for device ${device.displayName}. Didn't get a response in time. Try restarting Hubitat."
 		}
 		firmwareMutex.release()
 			
-		return firmwareStore.get(thisDeviceID)
+		return firmwareStore.get("${device.getDeviceNetworkId()}")
 	}
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
-	cmd.firmware0Version = cmd.applicationVersion as Integer
-	cmd.firmware0SubVersion = cmd.applicationSubVersion as Integer
-	processFirmwareReport(cmd)	
+	if (logEnable) log.debug "For device ${device.displayName}, Network id: ${"${device.getDeviceNetworkId()}"}, Received firmware version V1 report: ${cmd}"
+	if (firmwareStore.containsKey("${device.getDeviceNetworkId()}"))  firmwareStore.remove("${device.getDeviceNetworkId()}")
+	firmwareStore.put("${device.getDeviceNetworkId()}", [main:cmd.applicationVersion as Integer, sub:cmd.applicationSubVersion as Integer] )
+	log.info "Retrieved firmware update for device ${device.displayName}, firmware value is: ${firmwareStore.get("${device.getDeviceNetworkId()}")}."
+	firmwareMutex.release()
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {processFirmwareReport(cmd) }
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {processFirmwareReport(cmd) }
-
 void processFirmwareReport(cmd)
 {
 	if (logEnable) log.debug "For device ${device.displayName}, Network id: ${"${device.getDeviceNetworkId()}"}, Received firmware version report: ${cmd}"
-	if (firmwareStore.containsKey("${device.getDeviceNetworkId()}")) {
-		firmwareStore.replace("${device.getDeviceNetworkId()}", [main:cmd.firmware0Version as Integer, sub:cmd.firmware0SubVersion as Integer] )
-	} else {
-		firmwareStore.put("${device.getDeviceNetworkId()}", [main:cmd.firmware0Version as Integer, sub:cmd.firmware0SubVersion as Integer] )
-	}
+	if (firmwareStore.containsKey("${device.getDeviceNetworkId()}"))  firmwareStore.remove("${device.getDeviceNetworkId()}")
+	firmwareStore.put("${device.getDeviceNetworkId()}", [main:cmd.firmware0Version as Integer, sub:cmd.firmware0SubVersion as Integer] )
 	log.info "Retrieved firmware update for device ${device.displayName}, firmware value is: ${firmwareStore.get("${device.getDeviceNetworkId()}")}."
 	firmwareMutex.release()
 }
@@ -616,10 +613,16 @@ void processFirmwareReport(cmd)
 //////   Format messages, Send to Device, secure Messages      ///////
 ////////////////////////////////////////////////////////////////////// 
 
+
 void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
     // hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
 
 	Map parseMap = state.ZwaveClassVersions?.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
+        
+	// The following lines should only impact firmware gets that occur before the classes are obtained.
+	if (parseMap.is( null )) parseMap = [:]
+	if(!parseMap.containsKey(0x86 as Integer)) parseMap.put(0x86 as Integer,  1 as Integer)
+    
     hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap)
 	
     if (encapsulatedCommand) {
@@ -630,7 +633,11 @@ void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation c
 void parse(String description) {
     // if (logEnable) log.debug "For ${device.displayName}, parse:${description}"
 	Map parseMap = state.ZwaveClassVersions?.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
-
+ 
+	// The following 2 lines should only impact firmware gets that occur before the classes are obtained.
+	if (parseMap.is( null )) parseMap = [:]
+	if(!parseMap.containsKey(0x86 as Integer)) parseMap.put(0x86 as Integer,  1 as Integer)
+    
     hubitat.zwave.Command cmd = zwave.parse(description, parseMap)
 
     if (cmd) {
@@ -704,8 +711,9 @@ String productKey()
 	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
 	String deviceID = 		hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceId").toInteger(), 2) 
 	Map deviceFirmware = getFirmwareVersion()
-	Integer firmwareMain = 	 	deviceFirmware.main as Integer
-	Integer firmwareSub =  	 	deviceFirmware.sub as Integer
+	if (logEnable) log.debug "deviceFirmware in product key function is: ${deviceFirmware}"
+	Integer firmwareMain = 	 	deviceFirmware.get("main") as Integer
+	Integer firmwareSub =  	 	deviceFirmware.get("sub") as Integer
 	String key = "${manufacturer}:${deviceType}:${deviceID}:${firmwareMain}:${firmwareSub}"
 	return key
 }
@@ -787,11 +795,9 @@ void zwaveEvent(hubitat.zwave.commands.versionv3.VersionCommandClassReport cmd) 
 void processVersionCommandClassReport (cmd) {
 	if (logEnable) log.debug "Device Mfr, Type, ID is: ${productKey()}"
 	log.info "Initializing device ${device.displayName}, Adding command class info with class: ${cmd.requestedCommandClass}, version: ${cmd.commandClassVersion}"
-	if ( getClasses().containsKey(cmd.requestedCommandClass as Integer)){
-		getClasses().replace(cmd.requestedCommandClass as Integer, cmd.commandClassVersion as Integer)
-	} else {
-		getClasses().put(cmd.requestedCommandClass as Integer, cmd.commandClassVersion as Integer)
-	}
+	if ( getClasses().containsKey(cmd.requestedCommandClass as Integer)) getClasses().remove(cmd.requestedCommandClass as Integer)
+	getClasses().put(cmd.requestedCommandClass as Integer, cmd.commandClassVersion as Integer)
+
 	classVersionMutex.release(1)
 }
 
