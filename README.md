@@ -1,7 +1,9 @@
 # HubitatCustom
-# Advanced Zwave Plus Dimmer driver - Alpha Release!
+# Advanced Zwave Plus Dimmer driver  and Switch driver- Beta Releases!
 
-The file "Advanced Zwave Plus Dimmer Driver.groovy" is a dimmer driver file that can identify all the parameters for a device and provides input controls allowing the setting of each parameter.
+The file "Advanced Zwave Plus Dimmer Driver.groovy" is a dimmer driver file, and Advanced Zwave Plus Switch Driver.groovy" a Switch driver that can identify all the parameters for a device and provides input controls allowing the setting of each parameter.
+
+Central-Scene and Metering are both supported.
 
 The way this works is that the driver queries the opensmarthouse.com database using the device's manufacturer, device type, and device ID information to retrieve a database record identifying all the parameters for the device. That information is then saved in the device's "state".
 
@@ -20,6 +22,4 @@ Some tips:
 # Known Problems
 * Operation is a bit dicey when dealing with parameters that are expressed as bitmap fields! (one example of this is the custom-status LED selections for a HomeSweer WD200).  This is due to a bug in the Hubitat input control which I've reported to Hubitat. What happens is that the bitfield parameter input should allow you to click-select multiple inputs (i.e., to select multipe ones of the "bit" choices), but sometimes it only operates for single choice selection. To "Fix" this, de-select everything in the bitfield control, "Save Preferences" then try again.
 
-# Advanced Zwave Plus Switch driver - Work in Progress!
 
-The Advanced Zwave Plus Dimmer driver code was written to be usable for both switches and dimmers. The only real difference is which capabilities are left commented / uncommented.  I plan to add metering support making this "truly" universal, and will then release a switch version (as well as an updated dimmer version).
