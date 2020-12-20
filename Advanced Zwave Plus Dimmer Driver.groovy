@@ -110,8 +110,8 @@ metadata {
 			command "meterRefresh"
 			command "batteryGet"
 			
-			command "test"
-			command "getFirmwareVersion"
+			// command "test"
+			// command "getFirmwareVersion"
         // The following is for debugging. In final code, it can be removed!
     	// command "getDeviceDataFromDatabase"
 		
