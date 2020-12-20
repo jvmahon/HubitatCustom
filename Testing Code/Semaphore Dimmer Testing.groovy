@@ -232,13 +232,14 @@ List getOpenSmartHouseData()
         { resp->
             allParameterData = resp.data.parameters
         }
-		
+
+	
 	allParameterData.each
 	{
 		getZwaveParameterData().put(it.param_id as Integer, [size:it.size])
 	}
 	
-	if (logEnable) log.debug "allParameterData for device ${device.displayName}, database ID: ${mydevice.id} is: " + allParameterData
+	// if (logEnable) log.debug "allParameterData for device ${device.displayName}, database ID: ${mydevice.id} is: " + allParameterData
 	return allParameterData
 }
 
@@ -250,7 +251,7 @@ Map createInputControls(data)
 	
 	data.each
 	{
-		if (logEnable) log.debug "current data is: $it"
+		// if (logEnable) log.debug "current data is: $it"
 		if (it.bitmask.toInteger())
 		{
 			if (!(inputControls?.get(it.param_id)))
@@ -291,9 +292,9 @@ Map createInputControls(data)
 			{
 				newInput.type = "integer"
 			}
-			if(logEnable && deviceOptions) log.debug "deviceOptions is $deviceOptions"     
+			// if(logEnable && deviceOptions) log.debug "deviceOptions is $deviceOptions"     
 				 
-			if(logEnable) log.debug "newInput = ${newInput}"
+			// if(logEnable) log.debug "newInput = ${newInput}"
 			
 			// inputControls[it.param_id] = [input: newInput]
 			inputControls[it.param_id] = newInput
@@ -533,7 +534,8 @@ void processConfigurationReport(cmd) {
 	currentData.remove("pendingChangeValue")
 	
 	getZwaveParameterData().put(cmd.parameterNumber as Integer, currentData)
-	if (logEnable) log.debug "parameterData is now: ${getZwaveParameterData()}"
+	// if (logEnable) log.debug "parameterData is now: ${getZwaveParameterData()}"
+	state.parameterData = getZwaveParameterData()
 
 }
 
@@ -559,15 +561,10 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
 
 Map getFirmwareVersion()
 {
-	// log.debug "Firmware store is: ${firmwareStore}."
-	
 	Boolean locked = firmwareMutex.tryAcquire(1, 15, TimeUnit.SECONDS )
-	// if (logEnable) log.debug "Getfirmware locked: ${locked}."
 	
 	if (! firmwareStore.containsKey("${device.getDeviceNetworkId()}")) 
 	{
-		// log.debug "Sending Query to get firmware version for network key ${"${device.getDeviceNetworkId()}"}."
-		
 		sendToDevice(zwave.versionV1.versionGet())
 	
 		// When the firmware report handler is done it will release firmwareMutex
@@ -578,7 +575,6 @@ Map getFirmwareVersion()
 	} else {
 		firmwareMutex.release()
 		}
-	if (logEnable) log.debug "For device ${device.displayName}, firmware version is ${firmwareStore.get("${device.getDeviceNetworkId()}")}, and full system firmware storage is now: ${firmwareStore}."		
 	return firmwareStore.get("${device.getDeviceNetworkId()}")
 }
 
@@ -717,7 +713,6 @@ Map   getZwaveClassVersionMap(){
 	{
 		if (logEnable) log.debug "For device ${device.displayName}, product: ${productKey()}, initialize class versions using state.ZwaveClassVersions which is ${state.ZwaveClassVersions}"
 		state.ZwaveClassVersions?.each{
-			if (logEnable) log.debug "For device ${device.displayName}, Initializing classes with stored state value: ${it}."
 			getClasses().put(it.key as Integer, it.value as Integer)
 		}
 	}
@@ -1266,6 +1261,8 @@ void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelReport
 
 void processMultilevelReport(cmd)
 {
+	if (logEnable) log.debug "Received and processing multilevel report: ${cmd}."
+	
     if (device.hasAttribute("switch") || device.hasCapability("Switch")) 
 	{
 		eventProcess(	name: "switch", value: (cmd.value ? "on" : "off"), 
@@ -1328,11 +1325,13 @@ void off() {
 
 void setLevel(level, duration = 0)
 {
+	log.warn "To-do: add confirmsend capability in setLevel to be consistent with on / off functions. Implement code in setlevel() function to turn on a non-dimming switch in response to a setlevel command"
+
 	setIsDigitalEvent( true )
 	
-	if (logEnable) log.debug "Executing function setlevel(level, duration)."
+	if (logEnable) log.debug "Executing function setlevel(level = ${level}, duration = ${duration})."
 	if ( level < 0  ) level = 0
-	if ( level > 99 ) level = 99
+	if ( level > 100 ) level = 100
 	if ( duration < 0 ) duration = 0
 	if ( duration > 120 ) 
 		{
@@ -1349,7 +1348,7 @@ void setLevel(level, duration = 0)
 			if (getZwaveClassVersionMap().get(38 as Integer) == 1)
 			{
 				cmds.add(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: 0)))
-				log.warn "${device.displayName} does not support dimming duration settting command. Defaulting to dimming duration set by device parameters."
+				log.warn "${device.displayName} does not support dimming duration setting command. Defaulting to dimming duration set by device parameters."
 			} else {
 				cmds.add(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: 0, dimmingDuration: duration)))
 			}
@@ -1362,14 +1361,17 @@ void setLevel(level, duration = 0)
 		List<hubitat.zwave.Command> cmds = []
 			if (getZwaveClassVersionMap().get(38 as Integer) < 1)
 			{
-				cmds.add(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: level)))
-				log.warn "${device.displayName} does not support dimming duration settting command. Defaulting to dimming duration set by device parameters."
+				cmds.add(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: ((level > 99) ? 99 : level)   )))
+				log.warn "${device.displayName} does not support dimming duration setting command. Defaulting to dimming duration set by device parameters."
 			} else {
-				cmds.add(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: level, dimmingDuration: duration)))
+				cmds.add(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: ((level > 99) ? 99 : level), dimmingDuration: duration)))
 			}
         	if(cmds) sendToDevice(cmds)
 
+		} else {
+		log.warn "To-do: implement code in setlevel() function to turn on a non-dimming switch in response to a setlevel command!"
 		}
+		
 	if (logEnable) log.debug "Current switch value is ${device.currentValue("switch")}"
 	if (device.currentValue("switch") == "off")
 		{	
