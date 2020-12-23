@@ -1,4 +1,8 @@
 # HubitatCustom
+
+# Known Issues
+Update: Dec. 23 - The parameter set code is broken!  I should have a fix in a day or two.
+
 # Advanced Zwave Plus Dimmer driver  and Switch driver- Beta Releases!
 
 The file "Advanced Zwave Plus Dimmer Driver.groovy" is a dimmer driver file, and Advanced Zwave Plus Switch Driver.groovy" a Switch driver that can identify all the parameters for a device and provides input controls allowing the setting of each parameter.
