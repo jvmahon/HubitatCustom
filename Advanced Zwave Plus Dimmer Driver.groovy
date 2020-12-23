@@ -19,7 +19,7 @@ metadata {
 			capability "PowerMeter"
 			capability "VoltageMeasurement"
 			
-			capability "Battery"
+		//	capability "Battery"
 		
 		// Include the following for dimmable devices.
 			capability "SwitchLevel"
@@ -35,8 +35,13 @@ metadata {
 			capability "DoubleTapableButton"
 			command "doubleTap", ["NUMBER"]
 			
-			command "meterRefresh"
-			command "batteryGet"
+			// command "meterRefresh"
+			// command "batteryGet"
+			// command "waitForIt"
+        
+        // capability "Lock"
+		// capability "Lock Codes"
+        // command "lockrefresh"
 			
 			// command "test"
 			// command "getFirmwareVersion"
@@ -416,7 +421,7 @@ void getAllParameterValues()
 	getZwaveParameterData().each{k, v ->
 			if (logEnable) log.debug "Getting value of parameter ${k}"
 			cmds.add(secure(zwave.configurationV1.configurationGet(parameterNumber: k as Integer)))
-			cmds.add(secure("delay 250"))
+			// cmds.add("delay 250")
 		}
 	if (cmds) 
 	{
@@ -576,29 +581,15 @@ void sendToDevice(List<hubitat.zwave.Command> cmds) {
 }
 
 void sendToDevice(hubitat.zwave.Command cmd) {
-    sendHubCommand(new hubitat.device.HubAction(secureCommand(cmd), hubitat.device.Protocol.ZWAVE))
+    sendHubCommand(new hubitat.device.HubAction(cmd, hubitat.device.Protocol.ZWAVE))
 }
 
 void sendToDevice(String cmd) {
-    sendHubCommand(new hubitat.device.HubAction(secureCommand(cmd), hubitat.device.Protocol.ZWAVE))
+    sendHubCommand(new hubitat.device.HubAction(cmd, hubitat.device.Protocol.ZWAVE))
 }
 
-List<String> commands(List<hubitat.zwave.Command> cmds, Long delay=50) {
-    return delayBetween(cmds.collect{ secureCommand(it) }, delay)
-}
-
-String secureCommand(hubitat.zwave.Command cmd) {
-    secureCommand(cmd.format())
-}
-
-String secureCommand(String cmd) {
-    String encap=""
-    if (getDataValue("zwaveSecurePairingComplete") != "true") {
-        return cmd
-    } else {
-        encap = "988100"
-    }
-    return "${encap}${cmd}"
+List<String> commands(List<hubitat.zwave.Command> cmds, Long delay=100) {
+    return delayBetween(cmds.collect{ it }, delay)
 }
 
 String secure(String cmd){
@@ -636,11 +627,12 @@ String productKey()
 	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
 	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
 	String deviceID = 		hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceId").toInteger(), 2) 
-	Map deviceFirmware = getFirmwareVersion()
+	Map deviceFirmware = getFirmwareVersion() ?: [main:255 as Integer, sub:255 as Integer]
 	if (logEnable) log.debug "deviceFirmware in product key function is: ${deviceFirmware}"
 	Integer firmwareMain = 	 	deviceFirmware.get("main") as Integer
 	Integer firmwareSub =  	 	deviceFirmware.get("sub") as Integer
 	String key = "${manufacturer}:${deviceType}:${deviceID}:${firmwareMain}:${firmwareSub}"
+	if (logEnable) log.debug "Product key in function productKey is set to: ${key}."
 	return key
 }
 
@@ -652,8 +644,9 @@ Map getClasses() {
 
 Map   getZwaveClassVersionMap(){
 	// All the inclusters supported by the device
-	List<Integer> 	deviceInclusters = getDataValue("inClusters").split(",").collect{ hexStrToUnsignedInt(it) as Integer }
-					deviceInclusters << 32
+	List<Integer> 	deviceInclusters = getDataValue("inClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Integer }
+					deviceInclusters += getDataValue("secureInClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Integer }
+					if (!deviceInclusters.contains(32)) deviceInclusters += 32
 	
 	if ( getClasses().is( null) || (getClasses().size()) == 0)
 	{
@@ -1076,7 +1069,14 @@ void processMeterReport( cmd) {
 ////////////////////////////////////////////////////////////////////// 
 void zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) 
 {
-eventProcess ( name: "battery", value:cmd.batteryLevel, unit: "%", descriptionText: "Device ${device.displayName} battery level is ${cmd.batteryLevel}.")
+	if (cmd.batteryLevel == 0xFF) 
+	{
+		log.warn "Device ${device.displayName}, low battery warning!"
+		eventProcess ( name: "battery", value:1, unit: "%", descriptionText: "Device ${device.displayName}, Low Battery Alert. Change now!")
+	
+	} else {
+		eventProcess ( name: "battery", value:cmd.batteryLevel, unit: "%", descriptionText: "Device ${device.displayName} battery level is ${cmd.batteryLevel}.")
+	}
 }
 
 void batteryGet() {
@@ -1299,3 +1299,244 @@ void push(button){ sendButtonEvent("pushed", button, "digital") }
 void hold(button){ sendButtonEvent("held", button, "digital") }
 void release(button){ sendButtonEvent("released", button, "digital") }
 void doubleTap(button){ sendButtonEvent("doubleTapped", button, "digital") }
+
+
+
+//////////////////////////////////////////////////////////////////////
+//////        Handle Notifications        ///////
+//////////////////////////////////////////////////////////////////////
+
+void SetupNotifications()
+{
+	sendToDevice (secure(zwave.notificationV3.notificationSupportedGet()))
+
+}
+void getSupportedNotifications()
+{
+	sendToDevice (secure(zwave.notificationV3.notificationSupportedGet()))
+
+}
+
+void zwaveEvent(hubitat.zwave.commands.notificationv3.NotificationSupportedReport cmd) { ProcessNotificationSupportedReport (cmd) }
+void zwaveEvent(hubitat.zwave.commands.notificationv4.NotificationSupportedReport cmd) { ProcessNotificationSupportedReport (cmd) }
+void zwaveEvent(hubitat.zwave.commands.notificationv5.NotificationSupportedReport cmd) { ProcessNotificationSupportedReport (cmd) }
+void zwaveEvent(hubitat.zwave.commands.notificationv6.NotificationSupportedReport cmd) { ProcessNotificationSupportedReport (cmd) }
+void zwaveEvent(hubitat.zwave.commands.notificationv7.NotificationSupportedReport cmd) { ProcessNotificationSupportedReport (cmd) }
+void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationSupportedReport cmd) { ProcessNotificationSupportedReport (cmd) }
+void ProcessNotificationSupportedReport(cmd) {
+log.debug "Received Notification Supported Report ${cmd}."
+}
+//////////////////////////////////////////////////////////////////////
+//////        Locks        ///////
+//////////////////////////////////////////////////////////////////////
+// import hubitat.zwave.commands.doorlockv1.*
+
+void zwaveEvent(hubitat.zwave.commands.usercodev1.UserCodeReport cmd) { 
+log.debug "For device ${device.displayName}, received User Code Report: " + cmd
+}
+void zwaveEvent(hubitat.zwave.commands.usercodev1.UsersNumberReport cmd) { 
+log.debug "For device ${device.displayName}, received Users Number Report: " + cmd
+}
+void getNumberOfCodeUsers()
+{
+	sendToDevice (secure( zwave.userCodeV1.usersNumberGet() ))
+}
+
+void lockrefresh()
+{
+	sendToDevice (secure(zwave.doorLockV1.doorLockOperationGet()))
+
+}
+void lock()
+{
+   sendToDevice (secure( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 255) ))
+}
+void unlock()
+{
+   sendToDevice (secure( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0) )  )
+}
+
+void deleteCode(codeposition)
+{
+    log.debug "For device ${device.displayName}, deleting code at position ${codeNumber}."
+	sendToDevice (secure( zwave.userCodeV1.userCodeSet(userIdentifier:codeNumber, userIdStatus:0) ))
+	sendToDevice (secure( zwave.userCodeV1.userCodeGet(userIdentifier:codeNumber) ))
+}
+void getCodes()
+{
+	List<hubitat.zwave.Command> cmds=[]
+		cmds << secure(zwave.userCodeV1.usersNumberGet())
+		cmds << secure(zwave.userCodeV1.userCodeGet(userIdentifier: 1))
+	sendToDevice(cmds)
+}
+void setCode(codeposition, pincode, name)
+{
+
+	String userCode = pincode as String
+	log.debug "For device ${device.displayName}, setting code at position ${codeposition} to ${pincode}."
+	assert (userCode instanceof String) 
+/*
+	if (state.blankcodes) 
+    {
+		// Can't just set, we won't be able to tell if it was successful
+		if (state["pincode$codeNumber"] != "") 
+        {
+			if (state["setcode$codeNumber"] != userCode) 
+            {
+				state["resetcode$codeNumber"] = userCode
+				return deleteCode(codeNumber)
+			}
+		} 
+        else 
+        {
+			state["setcode$codeNumber"] = userCode
+		}
+	}
+*/
+	List<hubitat.zwave.Command> cmds=[]
+	cmds << secure(zwave.userCodeV1.userCodeSet(userIdentifier:codeposition, userIdStatus:1, userCode:userCode ))
+	cmds << secure(zwave.userCodeV1.userCodeGet(userIdentifier:codeposition))
+	sendToDevice(cmds)
+}
+void setCodeLength(pincodelength)
+{
+}
+
+void waitForIt()
+{
+	def result = []
+		result << response(secure(zwave.basicV1.basicGet()))
+	log.debug "Result of waitfor it is: " + result
+}
+
+// v1 and v2 are not implemented in Hubitat. 
+void zwaveEvent(hubitat.zwave.commands.notificationv3.NotificationReport cmd)  { processNotificationReport(cmd) }
+void zwaveEvent(hubitat.zwave.commands.notificationv4.NotificationReport cmd)  { processNotificationReport(cmd) }
+void zwaveEvent(hubitat.zwave.commands.notificationv5.NotificationReport cmd)  { processNotificationReport(cmd) }
+void zwaveEvent(hubitat.zwave.commands.notificationv6.NotificationReport cmd)  { processNotificationReport(cmd) }
+void zwaveEvent(hubitat.zwave.commands.notificationv7.NotificationReport cmd)  { processNotificationReport(cmd) }
+void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd)  { processNotificationReport(cmd) }
+
+void processNotificationReport(cmd)
+{
+	if (logEnable) log.debug "Processing Notification Report: " + cmd  
+
+	switch (cmd.notificationType as Integer)
+	{
+		case 6:
+			processAccessControlType6(cmd)
+			break
+		default :
+			log.warn "For device ${device.displayName}, Received a Notification Report with type: ${cmd.notificationType}, which is a type not processed by this driver."
+	}
+}
+
+
+void processAccessControlType6(cmd)
+{
+	if (logEnable) log.debug "Received Door Lock Operation Report: " + cmd  
+
+	Map lockEvent = [name: "lock"]
+	switch (cmd.event as Integer)
+	{
+	case 0x01:
+		lockEvent.value = "locked"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Manual Lock Operation."
+		break	
+	case 0x02:
+		lockEvent.value = "unlock"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Manual UnLock Operation."
+		break	
+	case 0x03:
+		lockEvent.value = "locked"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - RF Lock Operation."
+		break	
+	case 0x04:
+		lockEvent.value = "unlocked"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - RF UnLock Operation."
+		break	
+	case 0x05:
+		lockEvent.value = "locked"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Keypad Lock Operation."
+		break	
+	case 0x06:
+		lockEvent.value = "unlocked"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Keypad UnLock Operation."
+		break	
+	case 0x07:
+		lockEvent.value = "unknown"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Manual Not Fully Locked Operation."
+		break	
+	case 0x08:
+		lockEvent.value = "unknown"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - RF Not Fully Locked Operation."
+		break	
+	case 0x09:
+		lockEvent.value = "locked"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Auto Lock Lock Operation."
+		break	
+	case 0x0A:
+		lockEvent.value = "unknown"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Auto Lock Not Fully Locked Operation."
+		break	
+	case 0x0B:
+		lockEvent.value = "unknown"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Lock Jammed."
+		break	
+	default :
+		log.warn "Lock ${device.displayName} - An Undefined Event Occurred."
+		lockEvent.descriptionText = "Lock ${device.displayName} - An Undefined Event Occurred."
+		break
+	} 
+	sendEvent(lockEvent)	
+}
+
+void zwaveEvent(hubitat.zwave.commands.doorlockv1.DoorLockOperationReport cmd)  { processDoorLockMode }
+// Modes 2-4 are not implemented yet by Hubitat.
+// void zwaveEvent(hubitat.zwave.commands.doorlockv2.DoorLockOperationReport cmd)  { processDoorLockMode }
+// void zwaveEvent(hubitat.zwave.commands.doorlockv3.DoorLockOperationReport cmd)  { processDoorLockMode }
+// void zwaveEvent(hubitat.zwave.commands.doorlockv4.DoorLockOperationReport cmd)  { processDoorLockMode }
+void processDoorLockMode (cmd)
+{
+	if (logEnable) log.debug "Received Door Lock Operation Report: " + cmd  
+
+	Map lockEvent = [name: "lock"]
+	switch (cmd.doorLockMode as Integer)
+	{
+	case 0x00:	
+		lockEvent.value = "unlocked"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Door Unsecured."
+		break
+	case 0x01:
+		lockEvent.value = "unlocked with timeout"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Door Unsecured with timeout."
+		break
+	case 0x10:
+		lockEvent.value = "unlocked"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Door Unsecured for inside Door Handles."
+		break
+	case 0x11:
+		lockEvent.value = "unlocked with timeout"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Door Unsecured for inside Door Handles with timeout."
+		break
+	case 0x20:
+		lockEvent.value = "unlocked"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Door Unsecured for outside Door Handles."
+		break
+	case 0x21:
+		lockEvent.value = "unlocked with timeout"	
+		lockEvent.descriptionText = "Lock ${device.displayName} - Door Unsecured for outside Door Handles with timeout."
+		break		
+	case 0xFF:
+		lockEvent.value = "locked"
+		lockEvent.descriptionText = "Lock ${device.displayName} - Door Secured."
+		break
+	case 0xFE:
+	default :
+		lockEvent.value = "unknown"
+		lockEvent.descriptionText = "Lock ${device.displayName} had an unknown event."
+		break
+	}
+	sendEvent(lockEvent)
+}
+
