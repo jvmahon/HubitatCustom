@@ -957,13 +957,13 @@ void meterRefresh() {
 		sendToDevice(secure(zwave.meterV1.meterGet()))
 	} else {
 		List<hubitat.zwave.Command> cmds = []
-			if (state.meterTypesSupported.kWh ) cmds << secure(zwave.meterV3.meterGet(scale: 0))
-			if (state.meterTypesSupported.kVAh ) cmds << secure(zwave.meterV3.meterGet(scale: 1))
-			if (state.meterTypesSupported.Watts ) cmds << secure(zwave.meterV3.meterGet(scale: 2))
-			if (state.meterTypesSupported.PulseCount ) cmds << secure(zwave.meterV3.meterGet(scale: 3))
-			if (state.meterTypesSupported.Volts ) cmds << secure(zwave.meterV3.meterGet(scale: 4))
-			if (state.meterTypesSupported.Amps ) cmds << secure(zwave.meterV3.meterGet(scale: 5))
-			if (state.meterTypesSupported.PowerFactor ) cmds << secure(zwave.meterV3.meterGet(scale: 6))
+			if (state.meterTypesSupported?.kWh ) cmds << secure(zwave.meterV3.meterGet(scale: 0))
+			if (state.meterTypesSupported?.kVAh ) cmds << secure(zwave.meterV3.meterGet(scale: 1))
+			if (state.meterTypesSupported?.Watts ) cmds << secure(zwave.meterV3.meterGet(scale: 2))
+			if (state.meterTypesSupported?.PulseCount ) cmds << secure(zwave.meterV3.meterGet(scale: 3))
+			if (state.meterTypesSupported?.Volts ) cmds << secure(zwave.meterV3.meterGet(scale: 4))
+			if (state.meterTypesSupported?.Amps ) cmds << secure(zwave.meterV3.meterGet(scale: 5))
+			if (state.meterTypesSupported?.PowerFactor ) cmds << secure(zwave.meterV3.meterGet(scale: 6))
 		if (cmds) sendToDevice(cmds)	
 	}
 }
