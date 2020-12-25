@@ -1,32 +1,28 @@
-@Field static  Integer driverVersion = 1
+@Field static  Float driverVersion = 0.001
 import java.util.concurrent.*;
 import groovy.transform.Field
 
 metadata {
 	definition (name: "[Beta] Advanced Zwave Plus Metering Switch",namespace: "jvm", author: "jvm") {
-		capability "Initialize"
 		// capability "Configuration" // Does the same as Initialize, so don't show the separate control!
-		capability "Refresh"
+			capability "Initialize"
 		
- 		// Pick one of the following 5 Capabilities. Comment out the remainder.
-			// capability "Bulb"
-			// capability "Light"
-			// capability "Outlet"		
-			// capability "RelaySwitch"
+			capability "Refresh"
+		
+ 		// For switches and dimmers!
 			capability "Switch"	
+		//	capability "SwitchLevel"
 			
+		// Does anybody really use the "Change Level" controls? If so, uncomment it!
+		//	capability "ChangeLevel"
+			
+		//	These are generally harmless to keep in, even for non-metering devices, so generally leave uncommented	
 			capability "EnergyMeter"
 			capability "PowerMeter"
 			capability "VoltageMeasurement"
-			
-		capability "Battery"
-		
-		// Include the following for dimmable devices.
-			// capability "SwitchLevel"
-			// capability "ChangeLevel"
-		
+			command "meterRefresh"
+
 		// Central Scene functions. Include the "commands" if you want to generate central scene actions from the web interface. If they are not included, central scene will still be generated from the device.
-			
 			capability "PushableButton"
 			command "push", ["NUMBER"]	
 			capability "HoldableButton"
@@ -36,30 +32,27 @@ metadata {
 			capability "DoubleTapableButton"
 			command "doubleTap", ["NUMBER"]
 			
-			command "meterRefresh"
-			// command "batteryGet"
+		//	capability "Battery"
+		// 	command "batteryGet"
 			
-			// capability "Lock"
-			// capability "Lock Codes"
-			// command "lockrefresh"
-			// command "getSupportedNotifications"
-		
+		// capability "Lock"
+		// capability "Lock Codes"
+		// command "lockrefresh"
+
 		command "getAllParameterValues"
+				// command "getSupportedNotifications"
 		// capability "Sensor"
 		// capability "MotionSensor"
 		// capability "ContactSensor"
 		// capability "RelativeHumidityMeasurement"
 		// capability "SmokeDetector"
-		capability "TamperAlert"
+		// capability "TamperAlert"
 		// capability "TemperatureMeasurement"
 		// capability "WaterSensor"
-			
-			// command "test"
-			// command "getFirmwareVersion"
-        // The following is for debugging. In final code, it can be removed!
-    	// command "getDeviceDataFromDatabase"
+
 		
 		/** The "ResetDriverStateData" command deletes all state data stored by the driver. 
+		This is for debugging purposes. In production code, it can be removed.
 		*/
 		command "ResetDriverStateData"
 		
@@ -92,7 +85,7 @@ metadata {
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // The following ConcurrentHashMap is used to store data with a device key consisting of manufacturer/ device ID / device type / firmware main / firmware sub
-@Field static  ConcurrentHashMap<Long, Map> deviceSpecificData = new ConcurrentHashMap<String, Map>()
+@Field static  ConcurrentHashMap<String, Map> deviceSpecificData = new ConcurrentHashMap<String, Map>()
 
 /**
 getDeviceMapForProduct returns the main Map data structure containing all the data gathered for the particular Product and firmware version. The data may have been gathered by any of the drivers!
@@ -108,34 +101,15 @@ synchronized Map getDeviceMapForProduct()
 
 	String key = "${manufacturer}:${deviceType}:${deviceID}:${firmwareMain}:${firmwareSub}"
 
-	if (deviceSpecificData.containsKey(key)) 
-	{ 
-		return deviceSpecificData.get(key)
-	} else {
-		// Had been using a Semaphore to prevent duplicate writes, but synchronized keyword should do. Commented out Semaphore code!
-		// Lock before write and then re-check to be sure another process didn't lock / write first!
-		// createDeviceEntryMutex.tryAcquire(1, 5, TimeUnit.SECONDS )
-		if (!deviceSpecificData.containsKey(key)) deviceSpecificData.put(key, [:])
-		// createDeviceEntryMutex.release()
-		return deviceSpecificData.get(key)
-	}
+	return deviceSpecificData.get(key, [:])
+
 }
 
 synchronized Map getDeviceMapByNetworkID()
 {
 	String netID = device.getDeviceNetworkId()
 
-	if (deviceSpecificData.containsKey(netID)) 
-	{
-		return deviceSpecificData.get(netID)
-	} else {
-		// Had been using a Semaphore to prevent duplicate writes, but synchronized keyword should do. Commented out Semaphore code!
-		// Lock before write and then re-check to be sure another process didn't lock / write first!
-		// createDeviceEntryMutex.tryAcquire(1, 5, TimeUnit.SECONDS )
-		if (!deviceSpecificData.containsKey(netID)) deviceSpecificData.put(netID, [:])
-		// createDeviceEntryMutex.release()
-		return deviceSpecificData.get(netID)
-	}
+	return deviceSpecificData.get(netID, [:])
 }
 
 
@@ -295,11 +269,14 @@ void ResetDriverStateData() { state.clear()}
 void initialize()
 {
 	log.info "Initializing device ${device.displayName}."
-
-	if (state.driverVersion != driverVersion)
+	
+	if ((state.driverVersion.is( null) || (Math.floor(state?.driverVersion as Float) != Math.floor(driverVersion))))
 	{
-		log.info "Driver version updated for device ${device.displayName}, resetting all state data."
+		log.info "Driver main version number updated for device ${device.displayName}, resetting all state data."
 		ResetDriverStateData()
+		state.driverVersion = driverVersion
+	} else if (state.driverVersion as Float != driverVersion)
+	{
 		state.driverVersion = driverVersion
 	}
 	
@@ -351,10 +328,7 @@ void logsOff(){
 Map getPendingChangeMap()
 {
 	String key = "${device.getDeviceNetworkId()}:pendingChanges"
-	if (!allParameterDataStorage.containsKey(key)) { 
-		allParameterDataStorage.put(key, [:])
-	}
-	return  allParameterDataStorage.get(key)
+	allParameterDataStorage.get(key, [:])
 }
 
 
@@ -518,33 +492,37 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
 @Field static Semaphore firmwareMutex = new Semaphore(1)
 @Field static  ConcurrentHashMap<String, Map> firmwareStore = new ConcurrentHashMap<String, Map>()
 
-
 Map getFirmwareVersion()
 {
 	if (firmwareStore.containsKey("${device.getDeviceNetworkId()}")) {
 		return firmwareStore.get("${device.getDeviceNetworkId()}")
-	} else if (state.firmwareVersion) {
+	} else if ((state.firmwareVersion) && ((state.firmware?.main != 255) && (state.firmware?.sub != 255))) {
 		log.info "For device ${device.displayName}, Loading firmware version from state.firmwareVersion which has value: ${state.firmwareVersion}."
-		firmwareStore.put("${device.getDeviceNetworkId()}", [main: (state.firmwareVersion.main as Integer), sub: (state.firmwareVersion.sub as Integer)])
-		return firmwareStore.get("${device.getDeviceNetworkId()}")
+		return firmwareStore.get("${device.getDeviceNetworkId()}", [main: (state.firmwareVersion.main as Integer), sub: (state.firmwareVersion.sub as Integer)])
 	} else {
-		Boolean locked = firmwareMutex.tryAcquire(1, 20, TimeUnit.SECONDS )
+		// Lock a Semaphore which gets released by the handling function after it receives a response from the device
+		Boolean waitingForDeviceResponse = firmwareMutex.tryAcquire(1, 20, TimeUnit.SECONDS )
 		
-		if (locked == false) {
+		if (waitingForDeviceResponse == false) {
 			log.warn "Timed out getting lock to retrieve firmware version for device ${device.displayName}. Try restarting Hubitat."
 		}		
 		sendToDevice(secure(zwave.versionV1.versionGet()))
 		
 		// When the firmware report handler is done it will release firmwareMutex lock
-		// Thus, this next acquire causes effects a wait 10 seconds until the report is received and processed
-		Boolean locked2 = firmwareMutex.tryAcquire(1, 15, TimeUnit.SECONDS )
-		if (locked2 == false) {
+		// Thus, once code can acquire the Semaphore again, it knows the device responded and the firmware handler has completed
+		Boolean deviceResponded = firmwareMutex.tryAcquire(1, 15, TimeUnit.SECONDS )
+		if (deviceResponded == false) {
 			log.warn "Possible processing error getting firmware report for device ${device.displayName}. Didn't get a response in time. Try restarting Hubitat."
 		}
 		firmwareMutex.release()
-			
-		return firmwareStore.get("${device.getDeviceNetworkId()}")
+		
+		if (firmwareStore.containsKey("${device.getDeviceNetworkId()}")) { 		
+			return firmwareStore.get("${device.getDeviceNetworkId()}")
+		}
 	}
+	
+	log.warn "Failed to get firmware from device, using a defaul value of main:255, sub:255. The driver will try again next time firmware version is requested."
+	return [main:255, sub:255]
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
@@ -554,6 +532,8 @@ void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
 	}
 	firmwareStore.put("${device.getDeviceNetworkId()}", [main:cmd.applicationVersion as Integer, sub:cmd.applicationSubVersion as Integer] )
 	log.info "Retrieved firmware update for device ${device.displayName}, firmware value is: ${firmwareStore.get("${device.getDeviceNetworkId()}")}."
+	
+	// The calling function getFirmwareVersion() is waiting for this handler to finish, which is indicated by releasing a Semaphore.
 	firmwareMutex.release()
 }
 
@@ -657,8 +637,7 @@ String productKey()
 
 Map getClasses() { 
 	String key = productKey()
-	if (!deviceClasses.containsKey(key)) deviceClasses.put(key, [:])
-	return deviceClasses.get(key)
+	return deviceClasses.get(key, [:])
 }
 
 Map   getZwaveClassVersionMap(){
@@ -1106,7 +1085,7 @@ void batteryGet() {
 //////        Handle Basic Reports and Device Functions        ///////
 ////////////////////////////////////////////////////////////////////// 
 
-@Field static  ConcurrentHashMap<Long, Boolean> EventTypeIsDigital = new ConcurrentHashMap<Long, Boolean>()
+// @Field static  ConcurrentHashMap<Long, Boolean> EventTypeIsDigital = new ConcurrentHashMap<Long, Boolean>()
 
 Boolean isDigitalEvent() { return getDeviceMapByNetworkID().get("EventTypeIsDigital") as Boolean }
 void setIsDigitalEvent(Boolean value) { getDeviceMapByNetworkID().put("EventTypeIsDigital", value as Boolean)}
