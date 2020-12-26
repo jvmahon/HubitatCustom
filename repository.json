@@ -1,0 +1,14 @@
+{
+	"author": "jvm",
+	"gitHubUrl": "https://github.com/jvmahon",
+	"packages": [
+		{
+			"name": "Advanced Universal Z-Wave Drivers",
+			"category":"Integrations",
+			"tags": "ZWave",
+			"location": "https://raw.githubusercontent.com/jvmahon/HubitatCustom/main/packagemanifest.json",
+			"description": "A Z-Wave driver that includes parameter setting inputs for almost all devices. The driver(s) query the opensmarthouse.org zwave database to determine device parameters and customize itself for your devices."
+		}
+	]
+	
+}
