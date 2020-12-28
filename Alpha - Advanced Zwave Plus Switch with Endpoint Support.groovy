@@ -4,7 +4,7 @@ import java.util.concurrent.*;
 import groovy.transform.Field
 
 metadata {
-	definition (name: "[Beta] Advanced Zwave Plus Metering Switch with Endpoint Control",namespace: "jvm", author: "jvm") {
+	definition (name: "[Alpha] Advanced Zwave Plus Metering Switch with Endpoint Control",namespace: "jvm", author: "jvm") {
 			capability "Configuration" // Does the same as Initialize, so don't show the separate control!
 			capability "Initialize"
 			capability "Refresh"
