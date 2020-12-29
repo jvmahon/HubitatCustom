@@ -57,7 +57,7 @@ metadata {
 		This is for debugging purposes. In production code, it can be removed.
 		*/
 		// command "test"
-		command "ResetDriverStateData"
+		// command "ResetDriverStateData"
 		
 		/**
 			setParameter is a generalized function for setting parameters.	
@@ -146,30 +146,16 @@ synchronized Map getInputControlsForDevice()
 	} else {
 		if (logEnable) log.debug "Retrieving input control date from opensmarthouse.org for device ${device.displayName}."
 
-
-		// Testing without the error catching!
+		try {
 			List parameterData = getOpenSmartHouseData()
 			inputControls = createInputControls(allParameterData)
 			getDeviceMapForProduct().put("inputControls", inputControls)
-			state.parameterInputs = inputControls
-			return inputControls
-		/*
-		try
-		{
-			List parameterData = getOpenSmartHouseData()
-			inputControls = createInputControls(allParameterData)
-			getDeviceMapForProduct().put("inputControls", inputControls)
-		}
-		catch (Exception ex)
-		{
+		} catch (Exception ex) {
 			log.warn "An Error occurred when attempting to get input controls. Error: ${ex}."
-		}
-		finally
-		{
+		} finally {
 			state.parameterInputs = inputControls
 			return inputControls
 		}
-		*/
 	}
 }
 
