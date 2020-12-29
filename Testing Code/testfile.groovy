@@ -1721,4 +1721,3 @@ void processDoorLockMode (cmd)
 	}
 	sendEvent(lockEvent)
 }
-
