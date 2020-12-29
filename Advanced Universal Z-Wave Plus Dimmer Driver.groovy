@@ -316,18 +316,17 @@ void initialize()
 	state.ZwaveClassVersions = getZwaveClassVersionMap()
 	state.parameterInputs = getInputControlsForDevice()	
 
-	def opensmarthouseData = getDeviceMapForProduct().get("opensmarthouse")
-	// String inclusionInstructions = opensmarthouseData.get("inclusion").replaceAll("^<p>", "").replaceAll("<\\/p>", "").trim()
-	// String exclusionInstructions = opensmarthouseData.get("exclusion").replaceAll("^<p>", "").replaceAll("<\\/p>", "").trim()
+	def opensmarthouseData = getDeviceMapForProduct()?.get("opensmarthouse")
 	
-	String inclusionInstructions = opensmarthouseData.get("inclusion")
-	String exclusionInstructions = opensmarthouseData.get("exclusion")
-	
-	state.inclusion = "To include, set Hubitat in Z-Wave Include mode, then: ${inclusionInstructions}"
-	state.exclusion = "To exclude, set Hubitat in Z-Wave Exclude mode, then: ${exclusionInstructions}"
-	
-	state.device = "${opensmarthouseData.manufacturer?.label}: ${opensmarthouseData.label}, ${opensmarthouseData.description}."
-
+    if (opensmarthouseData) 
+    {
+        	String inclusionInstructions = opensmarthouseData?.get("inclusion")
+	        String exclusionInstructions = opensmarthouseData?.get("exclusion")
+            state.inclusion = "To include, set Hubitat in Z-Wave Include mode, then: ${inclusionInstructions}"
+	        state.exclusion = "To exclude, set Hubitat in Z-Wave Exclude mode, then: ${exclusionInstructions}"
+	        state.device = "${opensmarthouseData.manufacturer?.label}: ${opensmarthouseData?.label}, ${opensmarthouseData?.description}."
+    }
+    
 	getAllParameterValues()
 	setIsDigitalEvent( false )
 	
@@ -336,6 +335,7 @@ void initialize()
 	{
 		state.metersSupported = getSupportedMeters() 
 	}
+    
 	refresh()
 
 	log.info "Completed initializing device ${device.displayName}."
@@ -531,11 +531,11 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
 @Field static Semaphore firmwareMutex = new Semaphore(1)
 @Field static  ConcurrentHashMap<String, Map> firmwareStore = new ConcurrentHashMap<String, Map>()
 
-Map getFirmwareVersion()
+synchronized Map getFirmwareVersion()
 {
 	if (firmwareStore.containsKey("${device.getDeviceNetworkId()}")) {
 		return firmwareStore.get("${device.getDeviceNetworkId()}")
-	} else if ((state.firmwareVersion) && ((state.firmwareVersion?.main != 255) && (state.firmwareVersion?.sub != 255))) {
+	} else if ((state.firmwareVersion) && ((state.firmwareVersion?.main as Integer) != 255) ) {
 		if (logEnable) log.debug "For device ${device.displayName}, Loading firmware version from state.firmwareVersion which has value: ${state.firmwareVersion}."
 		return firmwareStore.get("${device.getDeviceNetworkId()}", [main: (state.firmwareVersion.main as Integer), sub: (state.firmwareVersion.sub as Integer)])
 	} else {
@@ -694,7 +694,7 @@ Map getClasses() {
 	return deviceClasses.get(key, [:])
 }
 
-Map   getZwaveClassVersionMap(){
+synchronized Map   getZwaveClassVersionMap(){
 	// All the inclusters supported by the device
 	List<Integer> 	deviceInclusters = getDataValue("inClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Integer }
 					deviceInclusters += getDataValue("secureInClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Integer }
@@ -1243,10 +1243,10 @@ void off(targetDevice = device ) {
 }
 
 // ep = channelNumber(dni)
-void componentSetLevel(childDevice, level) 				{ setLevelForDevice(level:level, duration:0, 		targetDevice:childDevice) }
-void componentSetLevel(childDevice, level, duration) 	{ setLevelForDevice(level:level, duration:duration, targetDevice:childDevice) }
-void setLevel(level) 									{ setLevelForDevice(level:level, duration:0, 		targetDevice:device) } 
-void setLevel(level, duration) 							{ setLevelForDevice(level:level, duration:duration, targetDevice:device) } 
+void componentSetLevel(childDevice, level) 				{ setLevelForDevice(level, 0, 			childDevice) }
+void componentSetLevel(childDevice, level, duration) 	{ setLevelForDevice(level, duration, 	childDevice) }
+void setLevel(level) 									{ setLevelForDevice(level, 0, 			device) } 
+void setLevel(level, duration) 							{ setLevelForDevice(level, duration, 	device) } 
 void setLevelForDevice(level, duration, targetDevice)
 {
 	
