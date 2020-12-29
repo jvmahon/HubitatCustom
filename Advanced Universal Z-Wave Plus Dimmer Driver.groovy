@@ -5,7 +5,7 @@ import groovy.transform.Field
 
 metadata {
 	definition (name: "[Beta] Advanced Zwave Plus Metering Dimmer",namespace: "jvm", author: "jvm") {
-			capability "Configuration" // Does the same as Initialize, so don't show the separate control!
+			// capability "Configuration" // Does the same as Initialize, so don't show the separate control!
 			capability "Initialize"
 			capability "Refresh"
 		
@@ -41,7 +41,7 @@ metadata {
 		// capability "Lock Codes"
 		// command "lockrefresh"
 
-		// command "getAllParameterValues"
+		command "getAllParameterValues"
 		// command "getSupportedNotifications"
 		// capability "Sensor"
 		// capability "MotionSensor"
@@ -58,7 +58,7 @@ metadata {
 		*/
 		// command "test"
 		command "ResetDriverStateData"
-		
+		command "getFirmwareVersion"
 		/**
 			setParameter is a generalized function for setting parameters.	
 		*/
@@ -394,7 +394,7 @@ void updated()
 	Map pendingChangeMap = 	getPendingChangeMap()
 		
 	if (logEnable) log.debug "Updating paramameter values. Last retrieved values are: " + parameterValueMap
-	state.parameterValues = parameterValueMap
+	// state.parameterValues = parameterValueMap
 	// Collect the settings values from the input controls
 	Map settingValueMap = [:]	
 	getInputControlsForDevice().each { PKey , PData -> 
@@ -609,11 +609,7 @@ void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation c
 	if (!parseMap.containsKey(0x86 as Integer)) {
 		parseMap.put(0x86 as Integer,  1 as Integer)
 	}
-    try {
 		hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap)
-	} catch (e) {
-		log.debug "Error parsing command in zwaveEvent.."
-	}
 	
     if (encapsulatedCommand) {
         zwaveEvent(encapsulatedCommand)
@@ -626,11 +622,8 @@ void parse(String description) {
 	if (parseMap.is( null )) parseMap = [:]
 	if(!parseMap.containsKey(0x86 as Integer)) parseMap.put(0x86 as Integer,  1 as Integer)
     
-    try {
-		hubitat.zwave.Command cmd = zwave.parse(description, parseMap)
-	} catch (e) {
-		log.debug "Error parsing command in zwaveEvent. Description is: ${description}."
-	}	
+	hubitat.zwave.Command cmd = zwave.parse(description, parseMap)
+	
     if (cmd) {
         zwaveEvent(cmd)
     }
