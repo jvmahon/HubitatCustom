@@ -41,8 +41,8 @@ metadata {
 		// capability "Lock Codes"
 		// command "lockrefresh"
 
-		command "getAllParameterValues"
-		command "getSupportedNotifications"
+		// command "getAllParameterValues"
+		// command "getSupportedNotifications"
 		// capability "Sensor"
 		// capability "MotionSensor"
 		// capability "ContactSensor"
