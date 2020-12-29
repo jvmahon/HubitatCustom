@@ -56,7 +56,7 @@ metadata {
 		/** The "ResetDriverStateData" command deletes all state data stored by the driver. 
 		This is for debugging purposes. In production code, it can be removed.
 		*/
-		command "test"
+		// command "test"
 		command "ResetDriverStateData"
 		
 		/**
