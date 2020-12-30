@@ -1,4 +1,4 @@
-@Field static String driverVersion = "0.0.1"
+@Field static String driverVersion = "0.0.2"
 @Field static Boolean deleteAndResetStateData = false
 import java.util.concurrent.*;
 import groovy.transform.Field
@@ -151,7 +151,7 @@ synchronized Map getInputControlsForDevice()
 			inputControls = createInputControls(allParameterData)
 			getDeviceMapForProduct().put("inputControls", inputControls)
 		} catch (Exception ex) {
-			log.warn "An Error occurred when attempting to get input controls. Error: ${ex}."
+			log.warn "Device ${device.displayName}: An Error occurred when attempting to get input controls. Error: ${ex}."
 		} finally {
 			state.parameterInputs = inputControls
 			return inputControls
@@ -196,7 +196,7 @@ List getOpenSmartHouseData()
 	}
     if (! mydevice.id) 
 	{
-	log.warn "No database entry found for manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}"
+	log.warn "Device ${device.displayName}: No database entry found for manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}"
 	return null
 	}
     
@@ -213,7 +213,7 @@ Map createInputControls(data)
 {
 	Map inputControls = [:]
 
-	if (logEnable) log.debug "Creating Input Controls"
+	if (logEnable) log.debug "Device ${device.displayName}: Creating Input Controls"
 	
 	data.each
 	{
@@ -222,7 +222,7 @@ Map createInputControls(data)
 		{
 			if (!(inputControls?.get(it.param_id)))
 			{
-				log.warn "Parameter ${it.param_id} is a bitmap field. This is poorly supported. Treating as an integer - rely on your user manual for proper values!"
+				log.warn "Device ${device.displayName}: Parameter ${it.param_id} is a bitmap field. This is poorly supported. Treating as an integer - rely on your user manual for proper values!"
 				Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", type:"integer", title: "(${it.param_id}) ${it.label} - bitmap", description: it.description, size:it.size, defaultValue: it.default]
 	
 				inputControls.put(it.param_id, newInput)
@@ -279,17 +279,12 @@ void refresh()
 
 void installed() { initialize() }
 
-void configure() 
-{ 	
-initialize()
-}
-
+void configure() { initialize() }
 
 Integer getMajorVersion(String semVer)
 {
 	def a = semVer?.split("\\.")
-	if (a.is( null ) ) 
-	{
+	if (a.is( null ) ) {
 		return -1 
 	} else {
 		return a[0] as Integer 
@@ -306,13 +301,13 @@ void initialize()
 		log.info "Driver main version number updated for device ${device.displayName}, resetting all state data."
 		state.clear()
 		state.driverVersionNum = driverVersion
-	} else if (state.driverVersionNum != driverVersion)
-	{
+	} else if (state.driverVersionNum != driverVersion) {
 		state.driverVersionNum = driverVersion
 	}
 	
 	state.firmwareVersion = getFirmwareVersion()
 	if (txtEnable) log.info "Device ${device.displayName} has firmware version: " + state.firmwareVersion
+
 	state.ZwaveClassVersions = getZwaveClassVersionMap()
 	state.parameterInputs = getInputControlsForDevice()	
 
@@ -331,7 +326,7 @@ void initialize()
 	setIsDigitalEvent( false )
 	
 	getCentralSceneInfo()
-	if (getZwaveClassVersionMap().containsKey(0x32))
+	if (getZwaveClassVersionMap().containsKey(0x32)) 
 	{
 		state.metersSupported = getSupportedMeters() 
 	}
@@ -353,7 +348,7 @@ void cleanup()
 }
 
 void logsOff(){
-    log.warn "debug logging disabled..."
+    log.warn "Device ${device.displayName}: debug logging disabled..."
     device.updateSetting("logEnable",[value:"false",type:"bool"])
 }
 
@@ -370,7 +365,6 @@ Map getPendingChangeMap()
 	allParameterDataStorage.get(key, [:])
 }
 
-
 Map getCurrentParameterValueMap()
 {
 	String key = "${device.getDeviceNetworkId()}:currentValues"
@@ -384,16 +378,15 @@ Map getCurrentParameterValueMap()
 	return  allParameterDataStorage.get(key)
 }
 
-
 void updated()
 {
-	if (txtEnable) log.info "Updating changed parameters (if any) . . ."
+	if (txtEnable) log.info "Device ${device.displayName}: Updating changed parameters (if any) . . ."
 	if (logEnable) runIn(1800,logsOff)
 	
 	Map parameterValueMap = getCurrentParameterValueMap()
 	Map pendingChangeMap = 	getPendingChangeMap()
 		
-	if (logEnable) log.debug "Updating paramameter values. Last retrieved values are: " + parameterValueMap
+	if (logEnable) log.debug "Device ${device.displayName}: Updating paramameter values. Last retrieved values are: " + parameterValueMap
 	// state.parameterValues = parameterValueMap
 	// Collect the settings values from the input controls
 	Map settingValueMap = [:]	
@@ -408,14 +401,14 @@ void updated()
 			}
 			settingValueMap.put(PKey as Integer, newValue)
 		}
-	if (logEnable) log.debug "Updating paramameter values. Settings control values are: " + settingValueMap
+	if (logEnable) log.debug "Device ${device.displayName}: Updating paramameter values. Settings control values are: " + settingValueMap
 
 	// Find what change
 
 	settingValueMap.each {k, v ->
 		if (parameterValueMap?.get(k as Integer).is( null) ) 
 		{
-			if (logEnable) log.debug "parameterValueMap ${k} is null." + pendingChangeMap
+			if (logEnable) log.debug "Device ${device.displayName}: parameterValueMap ${k} is null." + pendingChangeMap
 
 			pendingChangeMap.put(k as Integer, v as Integer)
 		} else {
@@ -424,8 +417,8 @@ void updated()
 		}
 	}
 	
-	if (logEnable) log.debug "Pending changes are: " + pendingChangeMap
-	if (logEnable) log.debug "Pending changes in ConcurrentHashMap are: " + getPendingChangeMap()
+	if (logEnable) log.debug "Device ${device.displayName}: Pending changes are: " + pendingChangeMap
+	if (logEnable) log.debug "Device ${device.displayName}: Pending changes in ConcurrentHashMap are: " + getPendingChangeMap()
 	state.pendingChanges = pendingChangeMap
 	
 	processPendingChanges()
@@ -438,15 +431,15 @@ void processPendingChanges()
 	Map pendingChangeMap = getPendingChangeMap()
 	Map parameterSizeMap = state.parameterInputs?.collectEntries{k, v -> [(k as Integer):(v.size as Short)]}
 
-	if (logEnable) log.debug "Processing pending parameter changes.  Pending Change Data is: " + pendingChangeMap
+	if (logEnable) log.debug "Device ${device.displayName}: Processing pending parameter changes.  Pending Change Data is: " + pendingChangeMap
 	if (parameterValueMap.is( null)) 
 		{
-			log.warn "Error: tried to process parameter data, but missing state.parameterValues map!"
+			log.warn "Device ${device.displayName}: Error: tried to process parameter data, but missing state.parameterValues map!"
 			return
 		}
 	pendingChangeMap?.each{ k, v ->
 		Short PSize = parameterSizeMap?.get(k as Integer)
-		if (logEnable) log.debug "Parameters for setParameter are: parameterNumber: ${k as Short}, size: ${PSize}, value: ${v}."
+		if (logEnable) log.debug "Device ${device.displayName}: Parameters for setParameter are: parameterNumber: ${k as Short}, size: ${PSize}, value: ${v}."
 		setParameter((k as Short), (PSize as Short), (v as BigInteger) ) 
 	}
 }
@@ -467,17 +460,17 @@ void getAllParameterValues()
 			cmds << secure(zwave.configurationV1.configurationGet(parameterNumber: k as Integer))
 		}
 	if (cmds) {
-		if (txtEnable) log.info "Sending commands to device ${device.displayName} to get all parameter values."
+		if (txtEnable) log.info "Device ${device.displayName}: Sending commands to get all parameter values."
 		sendToDevice(cmds)
 	} else {
-		if (txtEnable) log.info "No parameter values to retrieve for ${device.displayName}."
+		if (txtEnable) log.info "Device ${device.displayName}: No parameter values to retrieve."
 	}
 }
 
 
 void setParameter(Short parameterNumber = null, Short size = null, BigInteger value = null){
     if (parameterNumber.is( null ) || size.is( null ) || value.is( null ) ) {
-		log.warn "Can't set parameter ${parameterNumber}, Incomplete parameter list supplied... syntax: setParameter(parameterNumber,size,value), received: setParameter(${parameterNumber}, ${size}, ${value})."
+		log.warn "Device ${device.displayName}: Can't set parameter ${parameterNumber}, Incomplete parameter list supplied... syntax: setParameter(parameterNumber,size,value), received: setParameter(${parameterNumber}, ${size}, ${value})."
     } else {
 		List<hubitat.zwave.Command> cmds = []
 	    cmds << secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: value, parameterNumber: parameterNumber, size: size))
@@ -485,7 +478,6 @@ void setParameter(Short parameterNumber = null, Short size = null, BigInteger va
 		sendToDevice(cmds)
     }
 }
-
 
 void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd)	{ processConfigurationReport(cmd) }
 void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd)	{ processConfigurationReport(cmd) }
@@ -503,18 +495,17 @@ void processConfigurationReport(cmd) {
 	
 	if (parameterInputs.get(cmd.parameterNumber as Integer)?.multiple as Boolean)
 	{
-		log.warn "Code incomplete - Parameter ${cmd.parameterNumber} is a bitmap type which is not fully processed!"
+		log.warn "Device ${device.displayName}: Code incomplete - Parameter ${cmd.parameterNumber} is a bitmap type which is not fully processed!"
 	} else {
 		device.updateSetting("configParam${"${cmd.parameterNumber as Integer}".padLeft(3,"0")}" ,[value: (cmd.parameterNumber as Integer)])
 	}
-
 }
 
 //////////////////////////////////////////////////////////////////////
 //////                  Handle Supervision request            ///////
 ////////////////////////////////////////////////////////////////////// 
 void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
-    if (logEnable) log.debug "For ${device.displayName}, Supervision get: ${cmd}"
+    if (logEnable) log.debug "Device ${device.displayName}: Supervision get: ${cmd}"
 	
 	Map parseMap = state.ZwaveClassVersions?.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
 	// Map parseMap = getCommandClassVersions()
@@ -536,14 +527,14 @@ synchronized Map getFirmwareVersion()
 	if (firmwareStore.containsKey("${device.getDeviceNetworkId()}")) {
 		return firmwareStore.get("${device.getDeviceNetworkId()}")
 	} else if ((state.firmwareVersion) && ((state.firmwareVersion?.main as Integer) != 255) ) {
-		if (logEnable) log.debug "For device ${device.displayName}, Loading firmware version from state.firmwareVersion which has value: ${state.firmwareVersion}."
+		if (logEnable) log.debug "Device ${device.displayName}: Loading firmware version from state.firmwareVersion which has value: ${state.firmwareVersion}."
 		return firmwareStore.get("${device.getDeviceNetworkId()}", [main: (state.firmwareVersion.main as Integer), sub: (state.firmwareVersion.sub as Integer)])
 	} else {
 		// Lock a Semaphore which gets released by the handling function after it receives a response from the device
 		Boolean waitingForDeviceResponse = firmwareMutex.tryAcquire(1, 20, TimeUnit.SECONDS )
 		
 		if (waitingForDeviceResponse == false) {
-			log.warn "Timed out getting lock to retrieve firmware version for device ${device.displayName}. Try restarting Hubitat."
+			log.warn "Device ${device.displayName}, Timed out getting lock to retrieve firmware version for device ${device.displayName}. Try restarting Hubitat."
 		}		
 		sendToDevice(secure(zwave.versionV1.versionGet()))
 		
@@ -551,7 +542,7 @@ synchronized Map getFirmwareVersion()
 		// Thus, once code can acquire the Semaphore again, it knows the device responded and the firmware handler has completed
 		Boolean deviceResponded = firmwareMutex.tryAcquire(1, 15, TimeUnit.SECONDS )
 		if (deviceResponded == false) {
-			log.warn "Possible processing error getting firmware report for device ${device.displayName}. Didn't get a response in time. Try restarting Hubitat."
+			log.warn "Device ${device.displayName}: Possible processing error getting firmware report for device ${device.displayName}. Didn't get a response in time. Try restarting Hubitat."
 		}
 		firmwareMutex.release()
 		
@@ -560,17 +551,17 @@ synchronized Map getFirmwareVersion()
 		}
 	}
 	
-	log.warn "Failed to get firmware from device, using a defaul value of main:255, sub:255. The driver will try again next time firmware version is requested."
+	log.warn "Device ${device.displayName}: Failed to get firmware from device, using a defaul value of main:255, sub:255. The driver will try again next time firmware version is requested."
 	return [main:255, sub:255]
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
-	if (logEnable) log.debug "For device ${device.displayName}, Network id: ${"${device.getDeviceNetworkId()}"}, Received firmware version V1 report: ${cmd}"
+	if (logEnable) log.debug "Device ${device.displayName}: Network id: ${"${device.getDeviceNetworkId()}"}, Received firmware version V1 report: ${cmd}"
 	if (firmwareStore.containsKey("${device.getDeviceNetworkId()}"))  {
 		firmwareStore.remove("${device.getDeviceNetworkId()}")
 	}
 	firmwareStore.put("${device.getDeviceNetworkId()}", [main:cmd.applicationVersion as Integer, sub:cmd.applicationSubVersion as Integer] )
-	if (txtEnable) log.info "Device ${device.displayName}, firmware version is: ${firmwareStore.get("${device.getDeviceNetworkId()}")}."
+	if (txtEnable) log.info "Device ${device.displayName}: firmware version is: ${firmwareStore.get("${device.getDeviceNetworkId()}")}."
 	
 	// The calling function getFirmwareVersion() is waiting for this handler to finish, which is indicated by releasing a Semaphore.
 	firmwareMutex.release()
@@ -580,12 +571,12 @@ void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {processFirm
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {processFirmwareReport(cmd) }
 void processFirmwareReport(cmd)
 {
-	if (logEnable) log.debug "For device ${device.displayName}, Network id: ${"${device.getDeviceNetworkId()}"}, Received firmware version report: ${cmd}"
+	if (logEnable) log.debug "Device ${device.displayName}: Network id: ${"${device.getDeviceNetworkId()}"}, Received firmware version report: ${cmd}"
 	if (firmwareStore.containsKey("${device.getDeviceNetworkId()}"))  {
 		firmwareStore.remove("${device.getDeviceNetworkId()}")
 	}
 	firmwareStore.put("${device.getDeviceNetworkId()}", [main:cmd.firmware0Version as Integer, sub:cmd.firmware0SubVersion as Integer] )
-	if (txtEnable) log.info "Device ${device.displayName}, firmware version is: ${firmwareStore.get("${device.getDeviceNetworkId()}")}."
+	if (txtEnable) log.info "Device ${device.displayName}: firmware version is: ${firmwareStore.get("${device.getDeviceNetworkId()}")}."
 	firmwareMutex.release()
 }
 
@@ -593,9 +584,7 @@ void processFirmwareReport(cmd)
 //////                  Z-Wave Helper Functions                ///////
 //////   Format messages, Send to Device, secure Messages      ///////
 ////////////////////////////////////////////////////////////////////// 
-Integer channelNumber(String dni) {
-    dni.split("-ep")[-1] as Integer
-}
+
 
 
 void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
@@ -613,6 +602,29 @@ void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation c
 	
     if (encapsulatedCommand) {
         zwaveEvent(encapsulatedCommand)
+    }
+}
+
+void zwaveEvent(hubitat.zwave.commands.multichannelv3.MultiChannelCmdEncap cmd) { processMultichannelEncapsulatedCommand( cmd) }
+void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCmdEncap cmd) { processMultichannelEncapsulatedCommand( cmd) }
+void processMultichannelEncapsulatedCommand( cmd)
+{
+	Map parseMap = state.ZwaveClassVersions?.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
+        
+	// The following lines should only impact firmware gets that occur before the classes are obtained.
+	if (parseMap.is( null )) {
+		parseMap = [:]
+	}
+	if (!parseMap.containsKey(0x86 as Integer)) {
+		parseMap.put(0x86 as Integer,  1 as Integer)
+	}
+	
+    log.debug "Device ${device.displayName}: Processing Multi Channel Encapsulated Command: ${cmd}"
+    def encapsulatedCommand = cmd.encapsulatedCommand(parseMap)
+	log.debug "Device ${device.displayName}: Parsed Multi Channel Encapsulated Command: ${encapsulatedCommand} for endpoint ${cmd.sourceEndPoint}."
+
+    if (encapsulatedCommand) {
+        zwaveEvent(encapsulatedCommand, cmd.sourceEndPoint as Integer)
     }
 }
 
@@ -636,19 +648,15 @@ void sendToDevice(String cmd) { sendHubCommand(new hubitat.device.HubAction(cmd,
 List<String> commands(List<hubitat.zwave.Command> cmds, Long delay=200) { return delayBetween(cmds.collect{ it }, delay) }
 
 String secure(String cmd, ep = null){ 
-	if (ep)
-	{
+	if (ep) {
 		return zwaveSecureEncap(zwave.multiChannelV3.multiChannelCmdEncap(destinationEndPoint: ep).encapsulate(cmd))
-		// return zwave.multiChannelV3.multiChannelCmdEncap(destinationEndPoint: endpoint).encapsulate(zwaveSecureEncap(cmd))
 	} else {
 		return zwaveSecureEncap(cmd) 
 	}
 }
 String secure(hubitat.zwave.Command cmd, ep = null){ 
-	if (ep)
-	{
+	if (ep) {
 		return zwaveSecureEncap(zwave.multiChannelV3.multiChannelCmdEncap(destinationEndPoint: ep).encapsulate(cmd))
-		// return zwave.multiChannelV3.multiChannelCmdEncap(destinationEndPoint: endpoint).encapsulate(zwaveSecureEncap(cmd))
 	} else {
 		return zwaveSecureEncap(cmd) 
 	}
@@ -702,12 +710,15 @@ synchronized Map   getZwaveClassVersionMap(){
 	
 	if ( getClasses().is( null) || (getClasses().size()) == 0)
 	{
-		if (logEnable) log.debug "For device ${device.displayName}, product: ${productKey()}, initialize class versions using state.ZwaveClassVersions which is ${state.ZwaveClassVersions}"
+		if (logEnable) log.debug "Device ${device.displayName}: product: ${productKey()}, initialize class versions using state.ZwaveClassVersions which is ${state.ZwaveClassVersions}"
 		state.ZwaveClassVersions?.each{
 			getClasses().put(it.key as Integer, it.value as Integer)
 		}
 	}
-	if (logEnable) log.debug "Current classes for product key ${productKey()} are ${getClasses()}."
+	if (logEnable) log.warn "Version 2.2.4 of Hubitat has an error in processing the central scene report. Forcing central scene to version 1."
+	getClasses().put(0x5B as Integer, 1 as Integer)
+	
+	if (logEnable) log.debug "Device ${device.displayName}: Current classes for product key ${productKey()} are ${getClasses()}."
 	
 	List<Integer> neededClasses = []
 	
@@ -717,26 +728,26 @@ synchronized Map   getZwaveClassVersionMap(){
 		
 	if (neededClasses.size() == 0)
 	{
-		if (logEnable) log.debug "Already collected all classes for device ${device.displayName}. Classes are: " + getClasses()
+		if (logEnable) log.debug "Device ${device.displayName}: Already collected all command classes. Classes are: " + getClasses()
 		return getClasses()
 	} else {
-		if (logEnable) log.debug "Retrieving class versions for device ${device.displayName}. Missing Class count: ${neededClasses}."
+		if (logEnable) log.debug "Device ${device.displayName}: Retrieving command class versions. Missing Class count: ${neededClasses}."
 
 		try
 		{
 			neededClasses.each {
 				classVersionMutex.tryAcquire(1, 5, TimeUnit.SECONDS )
 
-				if (logEnable) log.debug "Getting version information for Zwave command class: " + it
+				if (logEnable) log.debug "Device ${device.displayName}: Getting version information for Zwave command class: " + it
 				sendToDevice(secure(zwave.versionV3.versionCommandClassGet(requestedCommandClass:it.toInteger())))
 			}
 			classVersionMutex.tryAcquire(2, 5, TimeUnit.SECONDS )
-			if (logEnable) log.debug "Full set of command class versions for device ${device.displayName} is: " + getClasses()
+			if (logEnable) log.debug "Device ${device.displayName}: Stored command classes are: " + getClasses()
 			// classVersionMutex.release(2)
 		}
 		catch (Exception ex)
 		{
-			log.warn "An Error occurred when attempting to get input controls. Error: ${ex}."
+			log.warn "Device ${device.displayName}: An Error occurred when attempting to get input controls. Error: ${ex}."
 		}
 		finally
 		{
@@ -808,7 +819,7 @@ void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneSupportedRepor
 void forceReleaseMessage(button)
 {
 	// only need to force a release hold if the button state is "held" when the timer expires
-    log.warn "Central Scene Release message for button ${button} not received before timeout - Faking a release message!"
+    log.warn "Device ${device.displayName}: Central Scene Release message for button ${button} not received before timeout - Faking a release message!"
     sendEvent(name:"released", value:button , type:"digital", descriptionText:"${device.displayName} button ${button} forced release")
 	putCCButtonState(button as Integer, "released")
 }
@@ -835,10 +846,10 @@ void cancelLostReleaseTimer(button)
 			case 6: unschedule(forceReleaseHold06); break
 			case 7: unschedule(forceReleaseHold07); break
 			case 8: unschedule(forceReleaseHold08); break
-			default : log.warn "Attempted to process lost release message code for button ${button}, but this is an error as code handles a maximum of 8 buttons."
+			default : log.warn "Device ${device.displayName}: Attempted to process lost release message code for button ${button}, but this is an error as code handles a maximum of 8 buttons."
 	    }
     }
-    catch (Exception ex) { log.debug "Exception in function cancelLostReleaseTimer: ${ex}"}
+    catch (Exception ex) { log.debug "Device ${device.displayName}: Exception in function cancelLostReleaseTimer: ${ex}"}
 }
 
 void setReleaseGuardTimer(button)
@@ -857,7 +868,7 @@ void setReleaseGuardTimer(button)
 		case 6: runIn(60, forceReleaseHold06); break
 		case 7: runIn(60, forceReleaseHold07); break
 		case 8: runIn(60, forceReleaseHold08); break
-		default : log.warn "Attempted to process lost release message code for button ${button}, but this is an error as code handles a maximum of 8 buttons."
+		default : log.warn "Device ${device.displayName}: Attempted to process lost release message code for button ${button}, but this is an error as code handles a maximum of 8 buttons."
 	}
 }
 
@@ -890,7 +901,7 @@ void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneNotification c
 synchronized void ProcessCCReport(cmd) {
 
     Map event = [type:"physical", isStateChange:true]
-	if(logEnable) log.debug "Received Central Scene Notification ${cmd}"
+	if(logEnable) log.debug "Device ${device.displayName}: Received Central Scene Notification ${cmd}"
 	
 	def taps = tapCount(cmd.keyAttributes)
 	
@@ -964,7 +975,7 @@ synchronized void ProcessCCReport(cmd) {
 		case 3: // Key Pressed 3 times
 		case 4: // Key Pressed 4 times
 		case 5: // Key Pressed 5 times
-			log.warn "Received and Ignored key tapped ${taps} times on button number ${cmd.sceneNumber}. Maximum button taps supported is 2"
+			log.warn "Device ${device.displayName}: Received and Ignored key tapped ${taps} times on button number ${cmd.sceneNumber}. Maximum button taps supported is 2"
 			break
 	}
 }
@@ -978,7 +989,7 @@ synchronized void ProcessCCReport(cmd) {
 
 Map getMeters() { 
 	String key = productKey()
-	if (logEnable) log.debug "Product Key in getMeters function is: " + key
+	if (logEnable) log.debug "Device ${device.displayName}: Product Key in getMeters function is: " + key
 	return meterTypesSupported.get(key, [:])
 }
 
@@ -995,9 +1006,9 @@ Boolean processedReport = false
 			locked = meterReportMutex.tryAcquire(1, 10, TimeUnit.SECONDS)
 				sendToDevice(secure(zwave.meterV2.meterSupportedGet()))
 			processedReport = meterReportMutex.tryAcquire(1, 10, TimeUnit.SECONDS)
-			if (! processedReport) log.warn "Timeout Error - Failed to process Meter Get Report within 10 seconds of request to device."
+			if (! processedReport) log.warn "Device ${device.displayName}: Timeout Error - Failed to process Meter Get Report within 10 seconds of request to device."
 			meterReportMutex.release(1)
-		} else if (txtEnable) log.info "Supported meter types for ${device.displayName} are ${state.metersSupported}."
+		} else if (txtEnable) log.info "Device ${device.displayName}: Supported meter types are ${state.metersSupported}."
 		return getMeters()
 	} else {
 	if (logEnable) log.debug "Device ${device.displayName} supports obsolete Z-Wave Meter Command Class Version 1 which has  not been implemented!. For support, enter a report on driver github site."
@@ -1005,7 +1016,7 @@ Boolean processedReport = false
 	}
 }
 void meterReset() {
-    if (txtEnable) log.info "${device.label?device.label:device.name}: Resetting energy statistics"
+    if (txtEnable) log.info "Device ${device.displayName}: Resetting energy statistics"
 	sendToDevice(secure(zwave.meterV2.meterReset()))
 }
 
@@ -1017,7 +1028,7 @@ void meterRefresh() {
 		return
 	}
 
-    if (txtEnable) log.info "Refreshing Energy Meter values for device: ${device.label?device.label:device.name}."
+    if (txtEnable) log.info "Refreshing Energy Meter values for device: ${device.displayName}."
 	
 	if (getZwaveClassVersionMap()?.get(50 as Integer) == 1)
 	{
@@ -1037,11 +1048,24 @@ void meterRefresh() {
 	}
 }
 
-void zwaveEvent(hubitat.zwave.commands.meterv2.MeterSupportedReport cmd) { ProcessMeterSupportedReport (cmd) }
-void zwaveEvent(hubitat.zwave.commands.meterv3.MeterSupportedReport cmd) { ProcessMeterSupportedReport (cmd) }
-void zwaveEvent(hubitat.zwave.commands.meterv4.MeterSupportedReport cmd) { ProcessMeterSupportedReport (cmd) }
-void zwaveEvent(hubitat.zwave.commands.meterv5.MeterSupportedReport cmd) { ProcessMeterSupportedReport (cmd) }
-void ProcessMeterSupportedReport (cmd) {
+void zwaveEvent(hubitat.zwave.commands.meterv2.MeterSupportedReport cmd, ep = null ) { ProcessMeterSupportedReport (cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.meterv3.MeterSupportedReport cmd, ep = null ) { ProcessMeterSupportedReport (cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.meterv4.MeterSupportedReport cmd, ep = null ) { ProcessMeterSupportedReport (cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.meterv5.MeterSupportedReport cmd, ep = null ) { ProcessMeterSupportedReport (cmd, ep) }
+void ProcessMeterSupportedReport (cmd, ep) {
+	def targetDevice
+	if (ep)
+	{
+		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
+		log.debug "Looking for a device endpoint: ${endpointID}"
+		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
+		log.debug "Device ${device.displayName}: Received a report from a device endpoint: ${ep} which is child device ${targetDevice.displayName}!"
+
+	} else {
+		targetDevice = device
+	}
+
+
 	Map meterMap = getMeters()
     if (cmd.meterType.toInteger() == 1 )
     {
@@ -1060,30 +1084,41 @@ void ProcessMeterSupportedReport (cmd) {
 			meterMap.put("kVarh"	, ( cmd.scaleSupportedBytes[1] & 0b00000010 ) as Boolean)
 		}
     } else  {
-		log.warn "Received a meter support type of ${cmd.meterType}."
+		log.warn "Device ${device.displayName}: Received a meter support type of ${cmd.meterType}."
 	}
 	meterReportMutex.release(1)
 }
 
-void zwaveEvent(hubitat.zwave.commands.meterv1.MeterReport cmd) { processMeterReport(cmd) }
-void zwaveEvent(hubitat.zwave.commands.meterv2.MeterReport cmd) { processMeterReport(cmd) }
-void zwaveEvent(hubitat.zwave.commands.meterv3.MeterReport cmd) { processMeterReport(cmd) }
-void zwaveEvent(hubitat.zwave.commands.meterv4.MeterReport cmd) { processMeterReport(cmd) }
-void zwaveEvent(hubitat.zwave.commands.meterv5.MeterReport cmd) { processMeterReport(cmd) }
+void zwaveEvent(hubitat.zwave.commands.meterv1.MeterReport cmd, ep = null ) { processMeterReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.meterv2.MeterReport cmd, ep = null ) { processMeterReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.meterv3.MeterReport cmd, ep = null ) { processMeterReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.meterv4.MeterReport cmd, ep = null ) { processMeterReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.meterv5.MeterReport cmd, ep = null ) { processMeterReport(cmd, ep) }
 
-void processMeterReport( cmd) {
-    log.debug "Meter Report for ${device.label?device.label:device.name} full contents are: ${cmd}"
-	log.debug "Meter Report class is: ${cmd.class}"
+void processMeterReport( cmd, ep ) {
+	def targetDevice
+	if (ep)
+	{
+		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
+		log.debug "Looking for a device endpoint: ${endpointID}"
+		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
+		log.debug "Device ${device.displayName}: Received a report from a device endpoint: ${ep}!"
 
-	if (logEnable && cmd.hasProperty("rateType") && (cmd.rateType != 1)) log.warn "Unexpected Meter rateType received. Value is: ${cmd.rateType}."
+	} else {
+		targetDevice = device
+	}
+	
+    if (logEnable) log.debug "Device ${device.displayName}: Meter Report class is: ${cmd.class}, full contents are: ${cmd}"
+
+	if (logEnable && cmd.hasProperty("rateType") && (cmd.rateType != 1)) log.warn "Device ${device.displayName}: Unexpected Meter rateType received. Value is: ${cmd.rateType}."
 	
 	if (cmd.meterType == 1)
 	{
 		switch (cmd.scale as Integer)
 		{
 		case 0: // kWh
-			sendEvent(name: "energy", value: cmd.scaledMeterValue, unit: "kWh")
-			if (txtEnable) log.info "${device.label?device.label:device.name}: Energy report received with value of ${cmd.scaledMeterValue} kWh"
+			targetDevice.sendEvent(name: "energy", value: cmd.scaledMeterValue, unit: "kWh")
+			if (txtEnable) log.info "${targetDevice.displayName}: Energy report received with value of ${cmd.scaledMeterValue} kWh"
 			break
             
 		case 1: // kVAh
@@ -1091,8 +1126,8 @@ void processMeterReport( cmd) {
             break
             
 		case 2: // W
-			sendEvent(name: "power", value: cmd.scaledMeterValue, unit: "W")
-			if (txtEnable) log.info "${device.label?device.label:device.name}: Power report received with value of ${cmd.scaledMeterValue} W"
+			targetDevice.sendEvent(name: "power", value: cmd.scaledMeterValue, unit: "W")
+			if (txtEnable) log.info "${targetDevice.displayName}: Power report received with value of ${cmd.scaledMeterValue} W"
 			break	
             
 		case 3: // Pulse Count
@@ -1100,25 +1135,25 @@ void processMeterReport( cmd) {
            break
             
 		case 4: // V
-			sendEvent(name: "voltage", value: cmd.scaledMeterValue, unit: "V")
-			if (txtEnable) log.info "${device.label?device.label:device.name}: Voltage report received with value of ${cmd.scaledMeterValue} V"
+			targetDevice.sendEvent(name: "voltage", value: cmd.scaledMeterValue, unit: "V")
+			if (txtEnable) log.info "${targetDevice.displayName}: Voltage report received with value of ${cmd.scaledMeterValue} V"
 			break
             
 		case 5: // A
-			sendEvent(name: "amperage", value: cmd.scaledMeterValue, unit: "A")
-			if (txtEnable) log.info "${device.label?device.label:device.name}: Amperage report received with value of ${cmd.scaledMeterValue} A"
+			targetDevice.sendEvent(name: "amperage", value: cmd.scaledMeterValue, unit: "A")
+			if (txtEnable) log.info "${targetDevice.displayName}: Amperage report received with value of ${cmd.scaledMeterValue} A"
 			break
             
 		case 6: // Power Factor
-			if (txtEnable) log.info "Received a meter report with unsupported type: Power Factor. This is not a Hubitat Supported meter value."
+			if (txtEnable) log.info "Device ${targetDevice.displayName}: Received a meter report with unsupported type: Power Factor. This is not a Hubitat Supported meter value."
             break
             
 		case 7: // M.S.T. - More Scale Types
- 			log.warn "Received a meter report with unsupported type: More Scale Types. Report was: ${cmd}."
+ 			log.warn "Device ${targetDevice.displayName}: Received a meter report with unsupported type: More Scale Types. Report was: ${cmd}."
            break
 		}
 	} else {
-		log.warn "Received unexpected meter type for ${device.label?device.label:device.name}. Only type '1' (Electric Meter) is supported. Received type: ${cmd.meterType}"
+		log.warn "Received unexpected meter type for ${targetDevice.displayName}. Only type '1' (Electric Meter) is supported. Received type: ${cmd.meterType}"
 	}
 }
 //////////////////////////////////////////////////////////////////////
@@ -1141,6 +1176,59 @@ void batteryGet() {
 }
 
 //////////////////////////////////////////////////////////////////////
+//////        Child Device Methods        ///////
+////////////////////////////////////////////////////////////////////// 
+
+Integer getEndpoint(com.hubitat.app.DeviceWrapper device)
+{
+return device.deviceNetworkId.split("-ep")[-1] as Integer
+}
+
+
+void componentRefresh(cd){
+    if (logEnable) log.info "received refresh request from ${cd.displayName}"
+}
+
+void componentOn(cd){
+    if (logEnable) log.info "received on request from ${cd.displayName}"
+	log.debug "cd is of class: " + cd.class
+
+    // getChildDevice(cd.deviceNetworkId).parse([[name:"switch", value:"on", descriptionText:"${cd.displayName} was turned on"]])
+	on(cd)
+}
+
+void componentOff(cd){
+    if (logEnable) log.info "received off request from ${cd.displayName}"
+    // getChildDevice(cd.deviceNetworkId).parse([[name:"switch", value:"off", descriptionText:"${cd.displayName} was turned off"]])
+	off(cd)
+}
+
+void componentSetLevel(cd,level,transitionTime = null) {
+    if (logEnable) log.info "received setLevel(${level}, ${transitionTime}) request from ${cd.displayName}"
+    // getChildDevice(cd.deviceNetworkId).parse([[name:"level", value:level, descriptionText:"${cd.displayName} level was set to ${level}%", unit: "%"]])
+	setLevelForDevice(level, transitionTime, cd)
+}
+
+void componentStartLevelChange(cd, direction) {
+    if (logEnable) log.info "received startLevelChange(${direction}) request from ${cd.displayName}"
+	startLevelChange(direction, cd)
+}
+
+void componentStopLevelChange(cd) {
+    if (logEnable) log.info "received stopLevelChange request from ${cd.displayName}"
+	stopLevelChange(cd)
+}
+
+void componentSetSpeed(cd, speed) {
+    if (logEnable) log.info "received setSpeed(${speed}) request from ${cd.displayName}"
+	log.warn "componentSetSpeed not yet implemented in driver!"
+    // getChildDevice(cd.deviceNetworkId).parse([[name:"level", value:level, descriptionText:"${cd.displayName} level was set to ${level}%", unit: "%"]])
+	setSpeed(speed, cd)
+}
+
+
+
+//////////////////////////////////////////////////////////////////////
 //////        Handle Basic Reports and Device Functions        ///////
 ////////////////////////////////////////////////////////////////////// 
 
@@ -1158,11 +1246,15 @@ void zwaveEvent(hubitat.zwave.commands.switchmultilevelv2.SwitchMultilevelReport
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
 void processDeviceReport(cmd,  ep)
 {
+	
 	def targetDevice
 	if (ep)
 	{
 		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
-		targetDevice = childDevices.find{ channelNumber(it.deviceNetworkId) == (ep as Integer)}
+		log.debug "Looking for a device endpoint: ${endpointID}"
+		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
+		log.debug "Device ${device.displayName}: Received a report from a device endpoint: ${ep}!"
+
 	} else {
 		targetDevice = device
 	}
@@ -1183,7 +1275,7 @@ void processDeviceReport(cmd,  ep)
 	} else {
 		turnedOn = (cmd.value as Integer) > (0 as Integer)
 		newLevel = cmd.value as Integer
-		if (logEnable) log.debug "Processed a report without a duration field. turnedOn = ${turnedOn}, newLevel=${newLevel}."
+		if (logEnable) log.debug "Device ${targetDevice.displayName}: Processed a report without a duration field. turnedOn = ${turnedOn}, newLevel=${newLevel}."
 	}
 	
     if (isSwitch) 
@@ -1205,58 +1297,57 @@ void processDeviceReport(cmd,  ep)
 	setIsDigitalEvent( false )
 }
 
-void componentOn(childDevice)  
-{ 
-	log.debug "Received on for child device ${childDevice.displayName}."
-	on(childDevice) 
-}
-void componentOff(childDevice) 
-{ 
-	log.debug "Received off for child device ${childDevice.displayName}."
-	off(childDevice) 
-}
-void on(targetDevice = device ) {
-	log.debug "Received on for target device: ${targetDevice.displayName}."
+
+
+void on(cd = null ) {
+	def targetDevice = (cd ? cd : device)
+	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+
+log.debug "Turning on a device ${targetDevice.displayName} with has child = ${ cd ? true : false } and endpoint ${ep}. "
+	if (logEnable) log.debug "Device ${targetDevice.displayName}: Received on()."
 
 	if (targetDevice.hasCapability("SwitchLevel")) {
-		Integer levelValue = (targetDevice.currentValue("level") as Integer) ?: 99
-		if (txtEnable) log.info "Turning device ${targetDevice.displayName} On to Level: ${levelValue}."
+		Integer level = (targetDevice.currentValue("level") as Integer) ?: 100
+		if (txtEnable) log.info "Device ${targetDevice.displayName}: setting to Level: ${level}."
 
-		sendToDevice(secure(zwave.basicV1.basicSet(value: levelValue ))	)	
+		sendToDevice(secure(zwave.basicV1.basicSet(value: ((level > 99) ? 99 : level)), ep)	)	
 	} else {
-		if (txtEnable) log.info "Turning device ${targetDevice.displayName} to: On."
-		sendToDevice(secure(zwave.basicV1.basicSet(value: 255 )))
+		if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning to: On."
+		sendToDevice(secure(zwave.basicV1.basicSet(value: 255 ), ep))
 	}
 	
 	targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
 }
 
-void off(targetDevice = device ) {
+void off(cd = null ) {
+	def targetDevice = (cd ? cd : device)
+	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+log.debug "Turning off a device ${targetDevice.displayName} with has child = ${ cd ? true : false } and endpoint ${ep}. "
 
-	log.debug "Received off for target device: ${targetDevice.displayName}."
+	if (logEnable) log.debug "Device ${targetDevice.displayName}: Received off."
 
-	if (txtEnable) log.info "Turning device ${targetDevice.displayName} to: Off."
+	if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning device to: Off."
 	
-	sendToDevice (secure(zwave.basicV1.basicSet(value: 0 )))
+	sendToDevice (secure(zwave.basicV1.basicSet(value: 0 ), ep))
 
 	targetDevice.sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} turned off", type: "digital")			
 }
 
-// ep = channelNumber(dni)
-void componentSetLevel(childDevice, level) 				{ setLevelForDevice(level, 0, 			childDevice) }
-void componentSetLevel(childDevice, level, duration) 	{ setLevelForDevice(level, duration, 	childDevice) }
-void setLevel(level) 									{ setLevelForDevice(level, 0, 			device) } 
-void setLevel(level, duration) 							{ setLevelForDevice(level, duration, 	device) } 
-void setLevelForDevice(level, duration, targetDevice)
+
+void setLevel(level) 									{ setLevelForDevice(level, 0, 			null ) } 
+void setLevel(level, duration) 							{ setLevelForDevice(level, duration, 	null ) } 
+void setLevelForDevice(level, duration, cd)
 {
+	def targetDevice = (cd ? cd : device)
+	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
 	
-	if (logEnable) log.debug "Executing function setlevel(level = ${level}, duration = ${duration})."
+	if (logEnable) log.debug "Device ${targetDevice.displayName}: Executing function setlevel(level = ${level}, duration = ${duration})."
 	if ( level < 0  ) level = 0
 	if ( level > 100 ) level = 100
 	if ( duration < 0 ) duration = 0
 	if ( duration > 120 ) 
 		{
-			log.warn "For device ${targetDevice.displayName}, tried to set a dimming duration value greater than 120 seconds. To avoid excessive turn on / off delays, this driver only allows dimming duration values of up to 127."
+			log.warn "Device ${targetDevice.displayName}: tried to set a dimming duration value greater than 120 seconds. To avoid excessive turn on / off delays, this driver only allows dimming duration values of up to 127."
 			duration = 120
 		}
 
@@ -1267,12 +1358,12 @@ void setLevelForDevice(level, duration, targetDevice)
 		
 		if (getZwaveClassVersionMap().get(38 as Integer) < 2)
 		{
-			sendToDevice(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: 0)))
+			sendToDevice(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: 0), ep))
 			log.warn "${targetDevice.displayName} does not support dimming duration setting command. Defaulting to dimming duration set by device parameters."
 		} else {
-			sendToDevice(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: 0, dimmingDuration: duration)))
+			sendToDevice(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: 0, dimmingDuration: duration), ep))
 		}
-		sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} remains at off", type: "digital")
+		targetDevice.sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} remains at off", type: "digital")
 		// Return after sending the switch off
 		return
 	}
@@ -1280,14 +1371,14 @@ void setLevelForDevice(level, duration, targetDevice)
 	if (targetDevice.hasCapability("SwitchLevel")) {		// Device is a dimmer!
 		if (getZwaveClassVersionMap().get(38 as Integer) < 2)
 		{
-			sendToDevice(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: ((level > 99) ? 99 : level)   )))
+			sendToDevice(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: ((level > 99) ? 99 : level)   ), ep))
 			if (logEnable) log.warn "${targetDevice.displayName} does not support dimming duration setting command. Defaulting to dimming duration set by device parameters."
 		} else {
-			sendToDevice(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: ((level > 99) ? 99 : level), dimmingDuration: duration)))
+			sendToDevice(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: ((level > 99) ? 99 : level), dimmingDuration: duration), ep))
 		}
 	} else if (targetDevice.hasCapability("Switch")) {   // Device is a non-dimming switch, but can still send the Z-wave level value
 		// To turn on a non-dimming switch in response to a setlevel command!"
-		sendToDevice(secure(zwave.basicV1.basicSet(value: ((level > 99) ? 99 : level) )))
+		sendToDevice(secure(zwave.basicV1.basicSet(value: ((level > 99) ? 99 : level) )), ep)
 	} else {
 		if (logEnable) log.debug "Received a setLevel command for device ${targetDevice.displayName}, but this is neither a switch or a dimmer device."
 	return
@@ -1297,9 +1388,9 @@ void setLevelForDevice(level, duration, targetDevice)
 	if (targetDevice.currentValue("switch") == "off") 
 	{	
 		if (logEnable) log.debug "Turning switch on in setlevel function"
-		sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
+		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
 	}
-	sendEvent(name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} set to ${level}%", type: "digital")
+	targetDevice.sendEvent(name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} set to ${level}%", type: "digital")
 }
 
 
@@ -1334,62 +1425,62 @@ void doubleTap(button)	{ sendButtonEvent("doubleTapped", 	button, "digital") }
 void zwaveEvent(hubitat.zwave.commands.sensormultilevelv11.SensorMultilevelReport cmd)  { processNotificationSupportedReport(cmd) }
 void processSensorMultilevelReport(cmd)
 {
-	log.warn "WARNING. MultiLevel Report code is currently incomplete. Sensor Multilevel Report is: " + cmd
+	log.warn "Device ${device.displayName}: WARNING. MultiLevel Report code is currently incomplete. Sensor Multilevel Report is: " + cmd
 	switch (cmd.sensorType)
 	{
 	case 0x01: // temperature
 		if (scale == 0x00) // Celcius
 		{
-			if (logEnable) log.debug "For device ${device.displayName}, received outside temperature report in celsius: ${cmd}."
+			if (logEnable) log.debug "Device ${device.displayName}: received outside temperature report in celsius: ${cmd}."
 
 		} else if (scale == 0x01) // Fahrenheit
 		{
-			if (logEnable) log.debug "For device ${device.displayName}, received temperature report in fahrenheit: ${cmd}."
+			if (logEnable) log.debug "Device ${device.displayName}: received temperature report in fahrenheit: ${cmd}."
 		}
 		break
 	case 0x03: // Illuminance
 		if (scale == 0x00) // Percentage value
 		{
-			if (logEnable) log.debug "For device ${device.displayName}, received illuminance report in %: ${cmd}."
+			if (logEnable) log.debug "Device ${device.displayName}: received illuminance report in %: ${cmd}."
 		} else if (scale == 0x01) // Lux
 		{
-			if (logEnable) log.debug "For device ${device.displayName}, received illuminance report in Lux: ${cmd}."
+			if (logEnable) log.debug "Device ${device.displayName}: received illuminance report in Lux: ${cmd}."
 		}
 		break	
 	case 0x04: // Power
 		if (scale == 0x00) // Watt(W)
 		{
-			if (logEnable) log.debug "For device ${device.displayName}, received power report in watts: ${cmd}."
+			if (logEnable) log.debug "Device ${device.displayName}: received power report in watts: ${cmd}."
 		} else if (scale == 0x01) // BTU/h
 		{
-			if (logEnable) log.debug "For device ${device.displayName}, received power report in BTU/h: ${cmd}."
+			if (logEnable) log.debug "Device ${device.displayName}: received power report in BTU/h: ${cmd}."
 		}
 		break		
 	case 0x05: // Humidity
 		if (scale == 0x00) // Percentage
 		{
-			if (logEnable) log.debug "For device ${device.displayName}, received Humidity report in percentage: ${cmd}."
+			if (logEnable) log.debug "Device ${device.displayName}: received Humidity report in percentage: ${cmd}."
 		} else if (scale == 0x01) // Absolute (g/m3)
 		{
-			if (logEnable) log.debug "For device ${device.displayName}, received Humidity report in g/m3: ${cmd}."
+			if (logEnable) log.debug "Device ${device.displayName}: received Humidity report in g/m3: ${cmd}."
 		}
 		break		
 	case 0x0F: // voltage
 		if (scale == 0x00) // Volt
 		{
-			if (logEnable) log.debug "For device ${device.displayName}, received voltage report in Volts: ${cmd}."
+			if (logEnable) log.debug "Device ${device.displayName}: received voltage report in Volts: ${cmd}."
 		} else if (scale == 0x01) // milliVolt
 		{
-			if (logEnable) log.debug "For device ${device.displayName}, received voltage report in milliVolts: ${cmd}."
+			if (logEnable) log.debug "Device ${device.displayName}: received voltage report in milliVolts: ${cmd}."
 		}
 		break		
 	case 0x40: // outside temperature
 		if (scale == 0x00) // Celcius
 		{
-			if (logEnable) log.debug "For device ${device.displayName}, received outside temperature report in celsius: ${cmd}."
+			if (logEnable) log.debug "Device ${device.displayName}: received outside temperature report in celsius: ${cmd}."
 		} else if (scale == 0x01) // Fahrenheit
 		{
-			if (logEnable) log.debug "For device ${device.displayName}, received outside temperature report in fahrenheit: ${cmd}."
+			if (logEnable) log.debug "FDevice ${device.displayName}: received outside temperature report in fahrenheit: ${cmd}."
 		}
 		break
 	default :
@@ -1420,7 +1511,7 @@ void zwaveEvent(hubitat.zwave.commands.notificationv7.NotificationSupportedRepor
 void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationSupportedReport cmd)  { processNotificationSupportedReport(cmd) }
 void processNotificationSupportedReport (cmd)  
 { 
-	if (logEnable) log.debug "Received Notification Supported Report: " + cmd 
+	if (logEnable) log.debug "Device ${device.displayName}: Received Notification Supported Report: " + cmd 
 		List<hubitat.zwave.Command> cmds=[]
 	
 	if (cmd.accessControl) 	cmds << secure(zwave.notificationV3.eventSupportedGet(notificationType: 6)) // Access Control
@@ -1454,17 +1545,17 @@ Boolean isTamperSensor = false
 	switch (cmd.notificationType)
 	{
 	case 1: // smoke
-		if (logEnable) log.debug "EventSupportedReport Smoke Type is: ${cmd}."
+		if (logEnable) log.debug "Device ${device.displayName}: EventSupportedReport Smoke Type is: ${cmd}."
 		break
 	case 5: // Water
-		if (logEnable) log.debug "EventSupportedReport Water Type is: ${cmd}."
+		if (logEnable) log.debug "Device ${device.displayName}: EventSupportedReport Water Type is: ${cmd}."
 		if (cmd.supportedEvents[1] || cmd.supportedEvents[2]) isLeakSensor = true // Motion Detected
 		break
 	case 6: // Access Control
-		if (logEnable) log.debug "EventSupportedReport Access Control Type is: ${cmd}."
+		if (logEnable) log.debug "Device ${device.displayName}: EventSupportedReport Access Control Type is: ${cmd}."
 		break
 	case 7: // burglar
-		if (logEnable) log.debug "EventSupportedReport burglar Type is: ${cmd}."
+		if (logEnable) log.debug "Device ${device.displayName}: EventSupportedReport burglar Type is: ${cmd}."
 		if (cmd.supportedEvents[7] || cmd.supportedEvents[8]) isMotionSensor = true // Motion Detected
 		if (cmd.supportedEvents[9]) isTamperSensor = true // Tamper, product moved
 		break
@@ -1483,32 +1574,33 @@ if (isLeakSensor)
 	if (!cd) cd = addChildDevice("hubitat", "Generic Component Water Sensor", childNetworkID, [name: childNetworkID, isComponent: true])
 }
 
-	if (logEnable) log.debug "Received Event Notification Supported Report: " + cmd 
+	if (logEnable) log.debug "Device ${device.displayName}: Received Event Notification Supported Report: " + cmd 
 }
 
 void sendEventToAll(Map event)
 {
-	if (logEnable) log.debug "For device ${device.displayName}, processing event: " + event
-	if (logEnable) log.debug  "Device has attribute: ${event.name}: " + device.hasAttribute(event.name as String)
+	if (logEnable) log.debug "Device ${device.displayName}: processing event: " + event
+	if (logEnable) log.debug "Device ${device.displayName}: Device has attribute: ${event.name}: " + device.hasAttribute(event.name as String)
 	if (device.hasAttribute(event.name as String)) sendEvent(event)
 
 	getChildDevices()?.each{ child ->
-			if (logEnable) log.debug "For child device ${child.displayName}, processing event: " + event
-			if (logEnable) log.debug  "Child device has attribute: ${event.name}: " + child.hasAttribute(event.name as String)
+			if (logEnable) log.debug "Device ${device.displayName}: For child device ${child.displayName}, processing event: " + event
+			if (logEnable) log.debug "Device ${device.displayName}: Child device has attribute: ${event.name}: " + child.hasAttribute(event.name as String)
 			if (child.hasAttribute(event.name as String)) sendEvent(event)
 		}
 }
 
 // v1 and v2 are not implemented in Hubitat. 
-void zwaveEvent(hubitat.zwave.commands.notificationv3.NotificationReport cmd)  { processNotificationReport(cmd) }
-void zwaveEvent(hubitat.zwave.commands.notificationv4.NotificationReport cmd)  { processNotificationReport(cmd) }
-void zwaveEvent(hubitat.zwave.commands.notificationv5.NotificationReport cmd)  { processNotificationReport(cmd) }
-void zwaveEvent(hubitat.zwave.commands.notificationv6.NotificationReport cmd)  { processNotificationReport(cmd) }
-void zwaveEvent(hubitat.zwave.commands.notificationv7.NotificationReport cmd)  { processNotificationReport(cmd) }
-void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd)  { processNotificationReport(cmd) }
-void processNotificationReport(cmd)
+void zwaveEvent(hubitat.zwave.commands.notificationv3.NotificationReport cmd, ep = null)  { processNotificationReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.notificationv4.NotificationReport cmd, ep = null)  { processNotificationReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.notificationv5.NotificationReport cmd, ep = null)  { processNotificationReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.notificationv6.NotificationReport cmd, ep = null)  { processNotificationReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.notificationv7.NotificationReport cmd, ep = null)  { processNotificationReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd, ep = null)  { processNotificationReport(cmd, ep) }
+void processNotificationReport(cmd, ep)
 {
-	if (logEnable) log.debug "Processing Notification Report: " + cmd  
+log.debug "Device ${device.displayName}: Received a Notification Report from an endpoint. Endpoints are currently not supported for notifications. Please inform developer so that this may be corrected."
+	if (logEnable) log.debug "Device ${device.displayName}: Processing Notification Report: " + cmd  
 	List<Map> events = []
 	switch (cmd.notificationType as Integer)
 	{
@@ -1525,7 +1617,7 @@ void processNotificationReport(cmd)
 			events = processHomeSecurityNotification(cmd)
 			break
 		default :
-			log.warn "For device ${device.displayName}, Received a Notification Report with type: ${cmd.notificationType}, which is a type not processed by this driver."
+			log.warn "Device ${device.displayName}: Received a Notification Report with type: ${cmd.notificationType}, which is a type not processed by this driver."
 	}
 	
 	events.each{ sendEventToAll(it) }
@@ -1537,21 +1629,21 @@ List<Map> processSmokeAlarmNotification(cmd)
 	switch (cmd.event as Integer)
 	{
 		case 0x00: // Status Idle
-			if (logEnable) log.debug "For device ${device.displayName}, Smoke Alarm Notification, Status Idle."
+			if (logEnable) log.debug "Device ${device.displayName}:  Smoke Alarm Notification, Status Idle."
 			events << [name:"smoke" , value:"clear", descriptionText:"Smoke detector status Idle."]
 			break
 		case 0x01: // Smoke detected (location provided)
-			if (logEnable) log.debug "For device ${device.displayName}, Smoke Alarm Notification, Smoke detected (location provided)."
+			if (logEnable) log.debug "Device ${device.displayName}:  Smoke Alarm Notification, Smoke detected (location provided)."
 			events << [name:"smoke" , value:"detected", descriptionText:"Smoke detected (location provided)."]
 			break
 		case 0x02: // Smoke detected
-			if (logEnable) log.debug "For device ${device.displayName}, Smoke Alarm Notification, Smoke detected."
+			if (logEnable) log.debug "Device ${device.displayName}:  Smoke Alarm Notification, Smoke detected."
 			events << [name:"smoke" , value:"detected", descriptionText:"Smoke detected."]
 			break
 		case 0xFE: // Unknown Event / State
-			if (logEnable) log.debug "For device ${device.displayName}, Smoke Alarm Notification, Unknown Event / State."
+			if (logEnable) log.debug "Device ${device.displayName}:  Smoke Alarm Notification, Unknown Event / State."
 		default :
-			log.warn "For device ${device.displayName}, Received a Notification Report with type: ${cmd.notificationType}, which is a type not processed by this driver."
+			log.warn "Device ${device.displayName}:  Received a Notification Report with type: ${cmd.notificationType}, which is a type not processed by this driver."
 	}
 	return events
 }
@@ -1562,21 +1654,21 @@ List<Map> processWaterAlarmNotification(cmd)
 	switch (cmd.event as Integer)
 	{
 		case 0x00: // Status Idle
-			if (logEnable) log.debug "For device ${device.displayName}, Water Alarm Notification, Status Idle."
+			if (logEnable) log.debug "Device ${device.displayName}:  Water Alarm Notification, Status Idle."
 			events << [name:"water" , value:"dry", descriptionText:"Water Alarm Notification, Status Dry."]
 			break
 		case 0x01: // Water leak detected (location provided)
-			if (logEnable) log.debug "For device ${device.displayName}, Water Alarm Notification, Water leak detected (location provided)."
+			if (logEnable) log.debug "Device ${device.displayName}:  Water Alarm Notification, Water leak detected (location provided)."
 			events << [name:"water" , value:"wet", descriptionText:"Water leak detected (location provided)."]
 			break
 		case 0x02: // Water leak detected
-			if (logEnable) log.debug "For device ${device.displayName}, Water Alarm Notification, Water leak detected."
+			if (logEnable) log.debug "Device ${device.displayName}:  Water Alarm Notification, Water leak detected."
 			events << [name:"water" , value:"wet", descriptionText:"Water leak detected."]
 			break
 		case 0xFE: // Unknown Event / State
-			if (logEnable) log.debug "For device ${device.displayName}, Water Alarm Notification, Unknown Event / State."
+			if (logEnable) log.debug "Device ${device.displayName}:  Water Alarm Notification, Unknown Event / State."
 		default :
-			log.warn "For device ${device.displayName}, Received a Notification Report with type: ${cmd.notificationType}, which is a type not processed by this driver."
+			log.warn "Device ${device.displayName}:  Received a Notification Report with type: ${cmd.notificationType}, which is a type not processed by this driver."
 	}
 	return events
 }
@@ -1656,7 +1748,7 @@ void unlock()
 
 void deleteCode(codeposition)
 {
-    if (logEnable) log.debug "For device ${device.displayName}, deleting code at position ${codeNumber}."
+    if (logEnable) log.debug "Device ${device.displayName}:  deleting code at position ${codeNumber}."
 	// userIDStatus of 0 corresponds to Z-Wave  "Available (not set)" status.
 	sendToDevice (secure( zwave.userCodeV1.userCodeSet(userIdentifier:codeNumber, userIdStatus:0) ))
 	sendToDevice (secure( zwave.userCodeV1.userCodeGet(userIdentifier:codeNumber) ))
@@ -1664,7 +1756,7 @@ void deleteCode(codeposition)
 
 void getCodes()
 {
-	log.warn "Lock code is still under development. getCodes function is not be fully implemented."
+	log.warn "Device ${device.displayName}: Lock code is still under development. getCodes function is not be fully implemented."
 
 	List<hubitat.zwave.Command> cmds=[]
 		cmds << secure(zwave.userCodeV1.usersNumberGet())
@@ -1676,10 +1768,10 @@ void getCodes()
 
 void setCode(codeposition, pincode, name)
 {
-	log.warn "Lock code is still under development. setCode function does not check for code length. You must ensure you use a permitted length!."
+	log.warn "Device ${device.displayName}: Lock code is still under development. setCode function does not check for code length. You must ensure you use a permitted length!."
 
 	String userCode = pincode as String
-	if (logEnable) log.debug "For device ${device.displayName}, setting code at position ${codeposition} to ${pincode}."
+	if (logEnable) log.debug "Device ${device.displayName}: setting code at position ${codeposition} to ${pincode}."
 	assert (userCode instanceof String) 
 
 	List<hubitat.zwave.Command> cmds=[]
@@ -1691,7 +1783,7 @@ void setCode(codeposition, pincode, name)
 
 void setCodeLength(pincodelength)
 {
-log.warn "Code Length command not supported. If your device supports code length settings, you may be able to set the code length using Z-Wave Parameter Settings controls."
+log.warn "Device ${device.displayName}: Code Length command not supported. If your device supports code length settings, you may be able to set the code length using Z-Wave Parameter Settings controls."
 }
 
 void processLockNotifications(cmd)
