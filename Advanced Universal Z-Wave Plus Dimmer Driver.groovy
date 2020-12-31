@@ -1,7 +1,32 @@
-@Field static String driverVersion = "0.0.2"
-@Field static Boolean deleteAndResetStateData = false
 import java.util.concurrent.*;
 import groovy.transform.Field
+
+@Field static String driverVersion = "0.0.3"
+@Field static Boolean deleteAndResetStateData = false
+@Field static defaultParseMap = [
+	0x20:2, // Basic Set
+	0x25:2, // Switch Binary
+	0x26:3, // Switch MultiLevel
+	0x31:11,// Sensor MultiLevel
+	0x32:5, // Meter
+	0x5B:1,	// Central Scene
+	0x60:4,	// MultiChannel
+	0x62:1,	// Door Lock
+	0x63:1,	// User Code
+	0x6C:1,	// Supervision
+	0x71:8, // Notification
+	0x80:1, // Battery
+	0x86:3,	// Version
+	0x98:1,	// Security
+	0x9B:2	// Configuration
+	]
+
+@Field static endPointMap = [
+[manufacturer:798, deviceId:1, deviceType:14, ep:[
+		1:[driver:"Generic Component Fan Control"], 
+		2:[driver:"Generic Component Dimmer"]
+		]]
+]
 
 metadata {
 	definition (name: "[Beta] Advanced Zwave Plus Metering Dimmer",namespace: "jvm", author: "jvm") {
@@ -246,7 +271,7 @@ Map createInputControls(data)
 			}
 			*/
 		} else {
-			Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) ${it.label}", description: it.description, size:it.size, defaultValue: it.default]
+			Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) ${it.label}", description: it.description, size:it.size, required: true , defaultValue: it.default]
 			
 			def deviceOptions = [:]
 			it.options.each { deviceOptions.put(it.value, it.label) }
