@@ -319,6 +319,7 @@ Integer getMajorVersion(String semVer)
 void initialize()
 {
 	log.info "Initializing device ${device.displayName}."
+	if (state.driverVersionNum == "0.0.2") state.remove("parameterInputs")
 	
 	if (deleteAndResetStateData) state.clear()
 	if (state.driverVersionNum.is( null) || (getMajorVersion(state.driverVersionNum) != getMajorVersion(driverVersion)))
