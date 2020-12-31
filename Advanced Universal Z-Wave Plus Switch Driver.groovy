@@ -1314,9 +1314,9 @@ void processDeviceReport(cmd,  ep)
 	if (isDimmer && turnedOn) // If it was turned off, that would be handle in the "isSwitch" block above.
 	{
 		targetDevice.sendEvent( 	name: "level", value: (newLevel == 99) ? 100 : newLevel, 
-					descriptionText: "Device ${targetDevice.displayName} level set to ${cmd.value}%", 
+					descriptionText: "Device ${targetDevice.displayName} level set to ${(newLevel == 99) ? 100 : newLevel}%", 
 					type: isDigitalEvent() ? "digital" : "physical" )
-		if (txtEnable) log.info "Device ${targetDevice.displayName} level set to ${cmd.value}%"			
+		if (txtEnable) log.info "Device ${targetDevice.displayName} level set to ${(newLevel == 99) ? 100 : newLevel}%"			
 	}
 
 	if (!isSwitch && !isDimmer) log.warn "For device ${targetDevice.displayName} receive a BasicReport which wasn't processed. Need to check BasicReport handling code." + cmd
