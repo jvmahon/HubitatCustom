@@ -1,4 +1,7 @@
 # HubitatCustom
+### Known Issues 0.0.4
+
+Scroll to the end to see a list of known issues!
 
 # Advanced Zwave Plus Dimmer driver  and Switch driver- Beta Releases!
 
@@ -21,6 +24,9 @@ Some tips:
 * Its recommended that you reboot after assigning the driver to your devices.
 
 # Known Problems
-* Operation is a bit dicey when dealing with parameters that are expressed as bitmap fields! (one example of this is the custom-status LED selections for a HomeSweer WD200).  This is due to a bug in the Hubitat input control which I've reported to Hubitat. What happens is that the bitfield parameter input should allow you to click-select multiple inputs (i.e., to select multipe ones of the "bit" choices), but sometimes it only operates for single choice selection. To "Fix" this, de-select everything in the bitfield control, "Save Preferences" then try again.
+* Parameter controls don't reliably show the current values
+* Parameter controls should be shorted in numeric order. Seems simple and obvious, but getting this to work reliably isn't!
+* For some devices, a "physical" event will follow a digital event. I believe this is due to fact that some devices automatically report their status whenever they are changed (thus, generating a second event), while other devices require the developer to generate the event.  This doesn't seem to cause any errors, so its in the "live with it for now" category while I fix other stuff.
+* Bitmap inputs are poorly supported.
 
 
