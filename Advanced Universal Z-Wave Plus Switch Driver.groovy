@@ -1,7 +1,32 @@
-@Field static String driverVersion = "0.0.2"
-@Field static Boolean deleteAndResetStateData = false
 import java.util.concurrent.*;
 import groovy.transform.Field
+
+@Field static String driverVersion = "0.0.3"
+@Field static Boolean deleteAndResetStateData = false
+@Field static defaultParseMap = [
+	0x20:2, // Basic Set
+	0x25:2, // Switch Binary
+	0x26:3, // Switch MultiLevel
+	0x31:11,// Sensor MultiLevel
+	0x32:5, // Meter
+	0x5B:1,	// Central Scene
+	0x60:4,	// MultiChannel
+	0x62:1,	// Door Lock
+	0x63:1,	// User Code
+	0x6C:1,	// Supervision
+	0x71:8, // Notification
+	0x80:1, // Battery
+	0x86:3,	// Version
+	0x98:1,	// Security
+	0x9B:2	// Configuration
+	]
+
+@Field static endPointMap = [
+[manufacturer:798, deviceId:1, deviceType:14, ep:[
+		1:[driver:"Generic Component Fan Control"], 
+		2:[driver:"Generic Component Dimmer"]
+		]]
+]
 
 metadata {
 	definition (name: "[Beta] Advanced Zwave Plus Metering Switch",namespace: "jvm", author: "jvm") {
@@ -11,7 +36,7 @@ metadata {
 		
  		// For switches and dimmers!
 			capability "Switch"	
-		    // capability "SwitchLevel"
+		//    capability "SwitchLevel"
 			
 		// Does anybody really use the "Change Level" controls? If so, uncomment it!
 		//	capability "ChangeLevel"
@@ -246,7 +271,7 @@ Map createInputControls(data)
 			}
 			*/
 		} else {
-			Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) ${it.label}", description: it.description, size:it.size, defaultValue: it.default]
+			Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", title: "(${it.param_id}) ${it.label}", description: it.description, size:it.size, required: true , defaultValue: it.default]
 			
 			def deviceOptions = [:]
 			it.options.each { deviceOptions.put(it.value, it.label) }
@@ -294,31 +319,24 @@ Integer getMajorVersion(String semVer)
 void initialize()
 {
 	log.info "Initializing device ${device.displayName}."
-log.debug "Step 1"
 	
 	if (deleteAndResetStateData) state.clear()
 	if (state.driverVersionNum.is( null) || (getMajorVersion(state.driverVersionNum) != getMajorVersion(driverVersion)))
 	{
 		log.info "Driver main version number updated for device ${device.displayName}, resetting all state data."
 		state.clear()
-log.debug "Step 2"
 		state.driverVersionNum = driverVersion
 	} else if (state.driverVersionNum != driverVersion) {
 		state.driverVersionNum = driverVersion
 	}
-log.debug "Step 3"
 	
 	state.firmwareVersion = getFirmwareVersion()
 	if (txtEnable) log.info "Device ${device.displayName} has firmware version: " + state.firmwareVersion
 
-log.debug "Step 4"
 	state.ZwaveClassVersions = getZwaveClassVersionMap()
-log.debug "Step 5"
 	state.parameterInputs = getInputControlsForDevice()	
-log.debug "Step 6"
 
 	def opensmarthouseData = getDeviceMapForProduct()?.get("opensmarthouse")
-log.debug "Step 7"
 	
     if (opensmarthouseData) 
     {
@@ -328,11 +346,9 @@ log.debug "Step 7"
 	        state.exclusion = "To exclude, set Hubitat in Z-Wave Exclude mode, then: ${exclusionInstructions}"
 	        state.device = "${opensmarthouseData.manufacturer?.label}: ${opensmarthouseData?.label}, ${opensmarthouseData?.description}."
     }
-log.debug "Step 8"
     
 	getAllParameterValues()
 	setIsDigitalEvent( false )
-log.debug "Step 9"
 	
 	getCentralSceneInfo()
 	if (getZwaveClassVersionMap().containsKey(0x32)) 
@@ -593,9 +609,7 @@ void processFirmwareReport(cmd)
 //////                  Z-Wave Helper Functions                ///////
 //////   Format messages, Send to Device, secure Messages      ///////
 ////////////////////////////////////////////////////////////////////// 
-Integer channelNumber(String dni) {
-    dni.split("-ep")[-1] as Integer
-}
+
 
 
 void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
@@ -613,6 +627,29 @@ void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation c
 	
     if (encapsulatedCommand) {
         zwaveEvent(encapsulatedCommand)
+    }
+}
+
+void zwaveEvent(hubitat.zwave.commands.multichannelv3.MultiChannelCmdEncap cmd) { processMultichannelEncapsulatedCommand( cmd) }
+void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCmdEncap cmd) { processMultichannelEncapsulatedCommand( cmd) }
+void processMultichannelEncapsulatedCommand( cmd)
+{
+	Map parseMap = state.ZwaveClassVersions?.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
+        
+	// The following lines should only impact firmware gets that occur before the classes are obtained.
+	if (parseMap.is( null )) {
+		parseMap = [:]
+	}
+	if (!parseMap.containsKey(0x86 as Integer)) {
+		parseMap.put(0x86 as Integer,  1 as Integer)
+	}
+	
+    log.debug "Device ${device.displayName}: Processing Multi Channel Encapsulated Command: ${cmd}"
+    def encapsulatedCommand = cmd.encapsulatedCommand(parseMap)
+	log.debug "Device ${device.displayName}: Parsed Multi Channel Encapsulated Command: ${encapsulatedCommand} for endpoint ${cmd.sourceEndPoint}."
+
+    if (encapsulatedCommand) {
+        zwaveEvent(encapsulatedCommand, cmd.sourceEndPoint as Integer)
     }
 }
 
@@ -703,6 +740,9 @@ synchronized Map   getZwaveClassVersionMap(){
 			getClasses().put(it.key as Integer, it.value as Integer)
 		}
 	}
+	if (logEnable) log.warn "Version 2.2.4 of Hubitat has an error in processing the central scene report. Forcing central scene to version 1."
+	getClasses().put(0x5B as Integer, 1 as Integer)
+	
 	if (logEnable) log.debug "Device ${device.displayName}: Current classes for product key ${productKey()} are ${getClasses()}."
 	
 	List<Integer> neededClasses = []
@@ -1039,11 +1079,13 @@ void zwaveEvent(hubitat.zwave.commands.meterv4.MeterSupportedReport cmd, ep = nu
 void zwaveEvent(hubitat.zwave.commands.meterv5.MeterSupportedReport cmd, ep = null ) { ProcessMeterSupportedReport (cmd, ep) }
 void ProcessMeterSupportedReport (cmd, ep) {
 	def targetDevice
-	log.debug "Received a meter supported report from a device endpoint! Device endpoints are currently not supported for this report type. Contact developer for correction!"
 	if (ep)
 	{
 		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
-		targetDevice = childDevices.find{ channelNumber(it.deviceNetworkId) == (ep as Integer)}
+		log.debug "Looking for a device endpoint: ${endpointID}"
+		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
+		log.debug "Device ${device.displayName}: Received a report from a device endpoint: ${ep} which is child device ${targetDevice.displayName}!"
+
 	} else {
 		targetDevice = device
 	}
@@ -1082,10 +1124,11 @@ void processMeterReport( cmd, ep ) {
 	def targetDevice
 	if (ep)
 	{
-		log.debug "Device ${device.displayName}: Received a meter report from a device endpoint: ${ep}!"
-
 		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
-		targetDevice = childDevices.find{ channelNumber(it.deviceNetworkId) == (ep as Integer)}
+		log.debug "Looking for a device endpoint: ${endpointID}"
+		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
+		log.debug "Device ${device.displayName}: Received a report from a device endpoint: ${ep}!"
+
 	} else {
 		targetDevice = device
 	}
@@ -1158,6 +1201,59 @@ void batteryGet() {
 }
 
 //////////////////////////////////////////////////////////////////////
+//////        Child Device Methods        ///////
+////////////////////////////////////////////////////////////////////// 
+
+Integer getEndpoint(com.hubitat.app.DeviceWrapper device)
+{
+return device.deviceNetworkId.split("-ep")[-1] as Integer
+}
+
+
+void componentRefresh(cd){
+    if (logEnable) log.info "received refresh request from ${cd.displayName}"
+}
+
+void componentOn(cd){
+    if (logEnable) log.info "received on request from ${cd.displayName}"
+	log.debug "cd is of class: " + cd.class
+
+    // getChildDevice(cd.deviceNetworkId).parse([[name:"switch", value:"on", descriptionText:"${cd.displayName} was turned on"]])
+	on(cd)
+}
+
+void componentOff(cd){
+    if (logEnable) log.info "received off request from ${cd.displayName}"
+    // getChildDevice(cd.deviceNetworkId).parse([[name:"switch", value:"off", descriptionText:"${cd.displayName} was turned off"]])
+	off(cd)
+}
+
+void componentSetLevel(cd,level,transitionTime = null) {
+    if (logEnable) log.info "received setLevel(${level}, ${transitionTime}) request from ${cd.displayName}"
+    // getChildDevice(cd.deviceNetworkId).parse([[name:"level", value:level, descriptionText:"${cd.displayName} level was set to ${level}%", unit: "%"]])
+	setLevelForDevice(level, transitionTime, cd)
+}
+
+void componentStartLevelChange(cd, direction) {
+    if (logEnable) log.info "received startLevelChange(${direction}) request from ${cd.displayName}"
+	startLevelChange(direction, cd)
+}
+
+void componentStopLevelChange(cd) {
+    if (logEnable) log.info "received stopLevelChange request from ${cd.displayName}"
+	stopLevelChange(cd)
+}
+
+void componentSetSpeed(cd, speed) {
+    if (logEnable) log.info "received setSpeed(${speed}) request from ${cd.displayName}"
+	log.warn "componentSetSpeed not yet implemented in driver!"
+    // getChildDevice(cd.deviceNetworkId).parse([[name:"level", value:level, descriptionText:"${cd.displayName} level was set to ${level}%", unit: "%"]])
+	setSpeed(speed, cd)
+}
+
+
+
+//////////////////////////////////////////////////////////////////////
 //////        Handle Basic Reports and Device Functions        ///////
 ////////////////////////////////////////////////////////////////////// 
 
@@ -1175,11 +1271,15 @@ void zwaveEvent(hubitat.zwave.commands.switchmultilevelv2.SwitchMultilevelReport
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
 void processDeviceReport(cmd,  ep)
 {
+	
 	def targetDevice
 	if (ep)
 	{
 		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
-		targetDevice = childDevices.find{ channelNumber(it.deviceNetworkId) == (ep as Integer)}
+		log.debug "Looking for a device endpoint: ${endpointID}"
+		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
+		log.debug "Device ${device.displayName}: Received a report from a device endpoint: ${ep}!"
+
 	} else {
 		targetDevice = device
 	}
@@ -1200,7 +1300,7 @@ void processDeviceReport(cmd,  ep)
 	} else {
 		turnedOn = (cmd.value as Integer) > (0 as Integer)
 		newLevel = cmd.value as Integer
-		if (logEnable) log.debug "Processed a report without a duration field. turnedOn = ${turnedOn}, newLevel=${newLevel}."
+		if (logEnable) log.debug "Device ${targetDevice.displayName}: Processed a report without a duration field. turnedOn = ${turnedOn}, newLevel=${newLevel}."
 	}
 	
     if (isSwitch) 
@@ -1222,72 +1322,49 @@ void processDeviceReport(cmd,  ep)
 	setIsDigitalEvent( false )
 }
 
-void componentOn(childDevice)  
-{ 
-	if (logEnable) log.debug "Device ${device.displayName}: Received on for child device ${childDevice.displayName}."
-	on(childDevice) 
-}
-void componentOff(childDevice) 
-{ 
-	if (logEnable) log.debug "Device ${device.displayName}: Received off for child device ${childDevice.displayName}."
-	off(childDevice) 
-}
-void on(target = null ) {
-	def targetDevice
-	if (target) {
-	log.warn "Device ${device.displayName}: received off command from child device, but child device isn't fully supported!"
-			targetDevice = device
-	} else {
-		targetDevice = device
-	}
 
+
+void on(cd = null ) {
+	def targetDevice = (cd ? cd : device)
+	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+
+log.debug "Turning on a device ${targetDevice.displayName} with has child = ${ cd ? true : false } and endpoint ${ep}. "
 	if (logEnable) log.debug "Device ${targetDevice.displayName}: Received on()."
 
 	if (targetDevice.hasCapability("SwitchLevel")) {
-		Integer levelValue = (targetDevice.currentValue("level") as Integer) ?: 99
-		if (txtEnable) log.info "Device ${targetDevice.displayName}: setting to Level: ${levelValue}."
+		Integer level = (targetDevice.currentValue("level") as Integer) ?: 100
+		if (txtEnable) log.info "Device ${targetDevice.displayName}: setting to Level: ${level}."
 
-		sendToDevice(secure(zwave.basicV1.basicSet(value: levelValue ))	)	
+		sendToDevice(secure(zwave.basicV1.basicSet(value: ((level > 99) ? 99 : level)), ep)	)	
 	} else {
 		if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning to: On."
-		sendToDevice(secure(zwave.basicV1.basicSet(value: 255 )))
+		sendToDevice(secure(zwave.basicV1.basicSet(value: 255 ), ep))
 	}
 	
 	targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
 }
 
-void off(target = null ) {
-	def targetDevice
-	if (target) {
-	log.warn "Device ${device.displayName}, received off command from child device, but child device isn't fully supported!"
-			targetDevice = device
-	} else {
-		targetDevice = device
-	}
+void off(cd = null ) {
+	def targetDevice = (cd ? cd : device)
+	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+log.debug "Turning off a device ${targetDevice.displayName} with has child = ${ cd ? true : false } and endpoint ${ep}. "
 
 	if (logEnable) log.debug "Device ${targetDevice.displayName}: Received off."
 
 	if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning device to: Off."
 	
-	sendToDevice (secure(zwave.basicV1.basicSet(value: 0 )))
+	sendToDevice (secure(zwave.basicV1.basicSet(value: 0 ), ep))
 
 	targetDevice.sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} turned off", type: "digital")			
 }
 
-// ep = channelNumber(dni)
-void componentSetLevel(childDevice, level) 				{ setLevelForDevice(level, 0, 			childDevice) }
-void componentSetLevel(childDevice, level, duration) 	{ setLevelForDevice(level, duration, 	childDevice) }
+
 void setLevel(level) 									{ setLevelForDevice(level, 0, 			null ) } 
 void setLevel(level, duration) 							{ setLevelForDevice(level, duration, 	null ) } 
-void setLevelForDevice(level, duration, target)
+void setLevelForDevice(level, duration, cd)
 {
-	def targetDevice
-	if (target) {
-	log.warn "Device ${device.displayName}, received off command from child device, but child device isn't fully supported!"
-			targetDevice = device
-	} else {
-		targetDevice = device
-	}
+	def targetDevice = (cd ? cd : device)
+	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
 	
 	if (logEnable) log.debug "Device ${targetDevice.displayName}: Executing function setlevel(level = ${level}, duration = ${duration})."
 	if ( level < 0  ) level = 0
@@ -1306,12 +1383,12 @@ void setLevelForDevice(level, duration, target)
 		
 		if (getZwaveClassVersionMap().get(38 as Integer) < 2)
 		{
-			sendToDevice(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: 0)))
+			sendToDevice(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: 0), ep))
 			log.warn "${targetDevice.displayName} does not support dimming duration setting command. Defaulting to dimming duration set by device parameters."
 		} else {
-			sendToDevice(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: 0, dimmingDuration: duration)))
+			sendToDevice(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: 0, dimmingDuration: duration), ep))
 		}
-		sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} remains at off", type: "digital")
+		targetDevice.sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} remains at off", type: "digital")
 		// Return after sending the switch off
 		return
 	}
@@ -1319,14 +1396,14 @@ void setLevelForDevice(level, duration, target)
 	if (targetDevice.hasCapability("SwitchLevel")) {		// Device is a dimmer!
 		if (getZwaveClassVersionMap().get(38 as Integer) < 2)
 		{
-			sendToDevice(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: ((level > 99) ? 99 : level)   )))
+			sendToDevice(secure(zwave.switchMultilevelV1.switchMultilevelSet(value: ((level > 99) ? 99 : level)   ), ep))
 			if (logEnable) log.warn "${targetDevice.displayName} does not support dimming duration setting command. Defaulting to dimming duration set by device parameters."
 		} else {
-			sendToDevice(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: ((level > 99) ? 99 : level), dimmingDuration: duration)))
+			sendToDevice(secure(zwave.switchMultilevelV2.switchMultilevelSet(value: ((level > 99) ? 99 : level), dimmingDuration: duration), ep))
 		}
 	} else if (targetDevice.hasCapability("Switch")) {   // Device is a non-dimming switch, but can still send the Z-wave level value
 		// To turn on a non-dimming switch in response to a setlevel command!"
-		sendToDevice(secure(zwave.basicV1.basicSet(value: ((level > 99) ? 99 : level) )))
+		sendToDevice(secure(zwave.basicV1.basicSet(value: ((level > 99) ? 99 : level) )), ep)
 	} else {
 		if (logEnable) log.debug "Received a setLevel command for device ${targetDevice.displayName}, but this is neither a switch or a dimmer device."
 	return
@@ -1336,9 +1413,9 @@ void setLevelForDevice(level, duration, target)
 	if (targetDevice.currentValue("switch") == "off") 
 	{	
 		if (logEnable) log.debug "Turning switch on in setlevel function"
-		sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
+		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
 	}
-	sendEvent(name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} set to ${level}%", type: "digital")
+	targetDevice.sendEvent(name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} set to ${level}%", type: "digital")
 }
 
 
