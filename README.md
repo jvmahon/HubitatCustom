@@ -1,7 +1,7 @@
 # HubitatCustom
-### Known Issues 0.0.5
+### Version History and known Issues 0.0.6
 
-Scroll to the end to see a list of known issues!
+Scroll to the end to see a list of known issues and version history info!
 
 # Advanced Zwave Plus Dimmer driver  and Switch driver- Beta Releases!
 
@@ -26,5 +26,8 @@ Some tips:
 # Known Problems
 * For some devices, a "physical" event will follow a digital event. I believe this is due to fact that some devices automatically report their status whenever they are changed (thus, generating a second event), while other devices require the developer to generate the event.  This doesn't seem to cause any errors, so its in the "live with it for now" category while I fix other stuff.
 * Bitmap inputs are poorly supported.
+
+# Version History
+0.0.6 - Numerous fixes for setting of parameters. Fix to avoid trying to set a "null" parameter. If currently stored paramenter is a "null" then try to re-get parameters on an Update.
 
 
