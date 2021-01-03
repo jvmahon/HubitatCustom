@@ -5,8 +5,8 @@
 
 Version 0.0.7 adds rudimentary support for devices with multiple endpoints.  The following devices should work . . .
 * Zooz ZEN 16
-* Zooz ZEN 20
-* Zooz ZEN 25
+* Zooz ZEN 20 
+* Zooz ZEN 25 -- But avoid this device until there is a fix for firmware bug. See: https://community.hubitat.com/t/incident-zooz-double-plug-model-zen25/58017
 * Zooz ZEN 30
 * Inovelli LZW36 (partial - still working on the setSpeed controls
 
