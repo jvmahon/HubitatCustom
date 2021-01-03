@@ -1,7 +1,7 @@
 import java.util.concurrent.*;
 import groovy.transform.Field
 
-@Field static String driverVersion = "0.0.6"
+@Field static String driverVersion = "0.0.7"
 @Field static Boolean deleteAndResetStateData = false
 @Field static defaultParseMap = [
 	0x20:2, // Basic Set
@@ -21,22 +21,63 @@ import groovy.transform.Field
 	0x9B:2	// Configuration
 	]
 
+// Endpoint 0 is not specified! Only detail for endpoints >= 1
+// May eventually just read this from opensmarthouse!
 @Field static endPointMap = [
-[manufacturer:798, deviceId:1, deviceType:14, ep:[
-		1:[driver:"Generic Component Fan Control"], 
-		2:[driver:"Generic Component Dimmer"]
-		]]
+	// Inovelli LZW36
+		[manufacturer:0x031E, deviceType:0x000E, deviceId:0x0001,  
+			ep:[
+				1:[name:"Fan", driver:"Generic Component Fan Control"], 
+				2:[name:"Light", driver:"Generic Component Dimmer"]
+				]],
+				
+	// Zooz Zen16
+		[manufacturer:0x027A, deviceType:0xA000, deviceId:0xA00A,  
+			ep:[
+				1:[name:"Relay 1", driver:"Generic Component Switch"], 
+				2:[name:"Relay 2", driver:"Generic Component Switch"], 
+				3:[name:"Relay 3", driver:"Generic Component Switch"] 
+				]
+		],	
+		
+	// Zooz Zen20
+		[manufacturer:0x027A, deviceType:0xA000, deviceId:0xA004,  
+			ep:[
+				1:[name:"Outlet 1", driver:"Generic Component Switch"], 
+				2:[name:"Outlet 2", driver:"Generic Component Switch"], 
+				3:[name:"Outlet 3", driver:"Generic Component Switch"], 
+				4:[name:"Outlet 4", driver:"Generic Component Switch"], 
+				5:[name:"Outlet 5", driver:"Generic Component Switch"], 
+				6:[name:"Outlet 6", driver:"Generic Component Switch"] 
+				]
+		],
+		
+	// Zooz Zen 25
+		[manufacturer:0x027A, deviceType:40960, deviceId:40963,  
+			ep:[
+				1:[name:"Left Switch", driver:"Generic Component Metering Switch"], 
+				2:[name:"Right Switch", driver:"Generic Component Metering Switch"], 
+				3:[name:"USB", driver:"Generic Component Switch"]
+				]
+		],	
+		
+	// Zooz Zen 30
+		[manufacturer:0x027A, deviceType:0xA000, deviceId:0xA008,  
+			ep:[
+				1:[name:"Left Switch", driver:"Generic Component Switch"]
+				]
+		]				
 ]
 
 metadata {
-	definition (name: "[Beta 0.0.6] Advanced Zwave Plus Metering Switch",namespace: "jvm", author: "jvm") {
+	definition (name: "[Beta 0.0.7] Advanced Zwave Plus Metering Switch",namespace: "jvm", author: "jvm") {
 			// capability "Configuration" // Does the same as Initialize, so don't show the separate control!
 			capability "Initialize"
 			capability "Refresh"
 		
  		// For switches and dimmers!
 			capability "Switch"	
-		   // capability "SwitchLevel"
+		    // capability "SwitchLevel"
 			
 		// Does anybody really use the "Change Level" controls? If so, uncomment it!
 		//	capability "ChangeLevel"
@@ -83,6 +124,8 @@ metadata {
 		*/
 		command "ResetDriverStateData"
 		command "getFirmwareVersion"
+		command "deleteChildDevices"
+		command "createChildDevices"
 
 		// setParameter is a generalized function for setting parameters.	
 			command "setParameter",[
@@ -114,6 +157,34 @@ void ResetDriverStateData()
 {
 	state.clear()
 }
+
+void deleteChildDevices()
+{
+	getChildDevices()?.each
+	{ child ->
+		deleteChildDevice(child.deviceNetworkId)
+	}
+}
+void createChildDevices()
+{	
+	Integer mfr = 	device.getDataValue("manufacturer").toInteger()
+	Integer type = 	device.getDataValue("deviceType").toInteger()
+	Integer id = 	device.getDataValue("deviceId").toInteger()
+	def endpointInfo = endPointMap.find{ (it.manufacturer == mfr) && (it.deviceType == type) && (it.deviceId 	== id)}
+	if (logEnable) log.debug "Endpoint Info is: ${endpointInfo}"	
+	
+	endpointInfo.ep.each{k, v ->
+		def childNetworkID = "${device.deviceNetworkId}-ep00${k}"
+		def cd = getChildDevice(childNetworkID)
+		if (!cd) {
+			log.info "creating child device: ${childNetworkID}"
+			addChildDevice("hubitat", v.driver, childNetworkID, [name: "${device.displayName}-${v.name}", isComponent: false])
+		} else {
+			log.info "Child device: ${childNetworkID} already exist. No need to re-create."
+		}
+	}	
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////  Utilities for storing data in a global Hash Map shared across driver instances  ////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -245,7 +316,7 @@ Map createInputControls(data)
 			if (!(inputControls?.get(it.param_id)))
 			{
 				log.warn "Device ${device.displayName}: Parameter ${it.param_id} is a bitmap field. This is poorly supported. Treating as an integer - rely on your user manual for proper values!"
-				Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", type:"integer", title: "(${it.param_id}) ${it.label} - bitmap", size:it.size]
+				Map newInput = [name: "configParam${"${it.param_id}".padLeft(3, "0")}", type:"number", title: "(${it.param_id}) ${it.label} - bitmap", size:it.size]
 				if ((it.description.size() != 0) && (it.description != it.label)) newInput.description = it.description
 				
 				inputControls.put(it.param_id, newInput)
@@ -263,7 +334,8 @@ Map createInputControls(data)
 				newInput.type = "enum"
 				newInput.options = deviceOptions
 			} else {
-				newInput.type = "integer"
+				newInput.type = "number"
+				newInput.range = "${it.minimum}..${it.maximum}"
 			}
 			inputControls[it.param_id] = newInput
 		}
@@ -309,6 +381,7 @@ void cleanState()
 	if (state.driverVersionNum == "0.0.3") state.clean()
 	if (state.driverVersionNum == "0.0.4") state.clean()
 	if (state.driverVersionNum == "0.0.5") state.clean()
+	if (state.driverVersionNum == "0.0.6") state.clean()	
 }
 
 void initialize()
@@ -342,7 +415,7 @@ void initialize()
 	if (getZwaveClassVersionMap().containsKey(0x5B)) getCentralSceneInfo()
 	
 	if (getZwaveClassVersionMap().containsKey(0x32)) state.metersSupported = getSupportedMeters()  
- 	if (getZwaveClassVersionMap().containsKey(0x60)) state.endpointData = getEndpointMap() 
+ 	if (getZwaveClassVersionMap().containsKey(0x60)) state.endpointData = getEndpointData()
 	
 	refresh()
 
@@ -375,22 +448,28 @@ void logsOff(){
 Map getPendingChangeMap()
 {
 	String key = "${device.getDeviceNetworkId()}:pendingChanges"
-	allParameterDataStorage.get(key, [:])
+	return allParameterDataStorage.get(key, [:])
 }
 
 Map getCurrentParameterValueMap()
 {
 	String key = "${device.getDeviceNetworkId()}:currentValues"
-	if (!allParameterDataStorage.containsKey(key)) {
+	/* if (!allParameterDataStorage.containsKey(key)) {
 		Map parameterValues = [:]
 		if (state.parameterValues) {
-			state.parameterValues.each{ k, v -> parameterValues.put(k as Integer, v as Integer)}
+			state.parameterValues.each{ k, v -> 
+					if ( k && v ) parameterValues.put(k as Integer, v as Integer)
+					}
 		}
-		allParameterDataStorage.put(key, parameterValues)
+		if (parameterValues.size() > 0) allParameterDataStorage.put(key, parameterValues)
 	}
-	return  allParameterDataStorage.get(key)
+	*/
+	return  allParameterDataStorage.get(key, [:])
 }
 
+///////////////////////////////////////////////////////////////////////////////////////
+///////      Handle Update(), and Set, Get, and Process Parameter Values       ////////
+/////////////////////////////////////////////////////////////////////////////////////// 
 void updated()
 {
 	if (txtEnable) log.info "Device ${device.displayName}: Updating changed parameters (if any) . . ."
@@ -419,7 +498,6 @@ void updated()
 	// Find what changed
 	settingValueMap.each {k, v ->
 	if (v.is(null)) return
-	if (logEnable) log.debug "For parameter ${k}, current value is ${v}. "
 		if (parameterValueMap?.get(k as Integer).is( null) ) 
 		{
 			// Parameter doesn't exist in previoulsy retrieved set, so add it to the pending change map.
@@ -428,7 +506,7 @@ void updated()
 			pendingChangeMap.put(k as Integer, v as Integer)
 		} else {
 			Boolean changedValue = (v as Integer) != (parameterValueMap.get(k as Integer) as Integer)
-			if (logEnable) log.debug "and current value changed = ${changedValue}, and value is ${(parameterValueMap.get(k as Integer) as Integer)}."
+			if (logEnable) log.debug "For parameter ${k}, prior input control value is ${v}, and value has been changed = ${changedValue}, and last retrieved value is ${(parameterValueMap.get(k as Integer) as Integer)}."
 			if (changedValue) pendingChangeMap.put(k as Integer, v as Integer)
 		}
 	}
@@ -437,6 +515,7 @@ void updated()
 	List<hubitat.zwave.Command> cmds = []
 	settingValueMap.each {k, v ->
 		if (v.is(null)) {
+		log.debug "Setting for parameter ${k} is null, so getting its value!"
 			cmds << secure(zwave.configurationV1.configurationGet(parameterNumber: k))
 		}
 	}
@@ -469,14 +548,11 @@ void processPendingChanges()
 		if (logEnable) log.debug "Device ${device.displayName}: Parameters for setParameter are: parameterNumber: ${k as Short}, size: ${PSize}, value: ${v}."
 		// setParameter((k as Short), (PSize as Short), (v as BigInteger) ) 
 		cmds << secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: (v as BigInteger), parameterNumber: (k as Short), size: (PSize as Short)))
-	    cmds << secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber))
+	    cmds << secure(zwave.configurationV1.configurationGet(parameterNumber: (k as Short)))
 	}
 	if (cmds) sendToDevice(cmds)
 }
 
-//////////////////////////////////////////////////////////////////////
-///////        Set, Get, and Process Parameter Values         ////////
-////////////////////////////////////////////////////////////////////// 
 
 void getParameterValue(parameterNumber)
 {
@@ -524,6 +600,7 @@ void processConfigurationReport(cmd) {
 	Integer newValue = (cmd.size == 1) ? cmd.configurationValue[0] : cmd.scaledConfigurationValue
 	if (newValue < 0 ) log.warn "Device ${device.displayName}: Received a negative scaledConfigurationValue value in processConfigurationReport for report ${cmd}."
 
+	log.info "Device ${device.displayName}: Received device report - Configuration parameter ${cmd.parameterNumber} has value ${newValue}."
 	parameterValueMap.put(cmd.parameterNumber as Integer, newValue)
 	pendingChangeMap.remove(cmd.parameterNumber as Integer)
 	state.parameterValues = parameterValueMap
@@ -660,10 +737,11 @@ void parse(String description) {
 	Map parseMap = state.ZwaveClassVersions?.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
 	// The following 2 lines should only impact firmware gets that occur before the classes are obtained.
 	if (parseMap.is( null )) parseMap = [:]
-	if (!parseMap.containsKey(0x86 as Integer)) parseMap.put(0x86 as Integer,  1 as Integer)
+	if (!parseMap.containsKey(0x86 as Integer)) parseMap.put(0x86 as Integer, 1 as Integer)
+	if (!parseMap.containsKey(0x32 as Integer)) parseMap.put(0x32 as Integer, 1 as Integer)
+	if (logEnable) log.debug "Parsing description string: ${description}"
+		hubitat.zwave.Command cmd = zwave.parse(description, parseMap)
 
-	hubitat.zwave.Command cmd = zwave.parse(description, parseMap)
-	
     if (cmd) { zwaveEvent(cmd) }
 }
 
@@ -691,6 +769,20 @@ String secure(hubitat.zwave.Command cmd, ep = null){
 
 void zwaveEvent(hubitat.zwave.Command cmd) {
     if (logEnable) log.debug "For ${device.displayName}, skipping command: ${cmd}"
+}
+
+
+void sendEventToAll(Map event)
+{
+	if (logEnable) log.debug "Device ${device.displayName}: processing event: " + event
+	if (logEnable) log.debug "Device ${device.displayName}: Device has attribute: ${event.name}: " + device.hasAttribute(event.name as String)
+	if (device.hasAttribute(event.name as String)) sendEvent(event)
+
+	getChildDevices()?.each{ child ->
+			if (logEnable) log.debug "Device ${device.displayName}: For child device ${child.displayName}, processing event: " + event
+			if (logEnable) log.debug "Device ${device.displayName}: Child device has attribute: ${event.name}: " + child.hasAttribute(event.name as String)
+			if (child.hasAttribute(event.name as String)) child.sendEvent(event)
+		}
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -742,8 +834,9 @@ Map   getZwaveClassVersionMap(){
 			getClasses().put(it.key as Integer, it.value as Integer)
 		}
 	}
-	if (logEnable) log.warn "Version 2.2.4 of Hubitat has an error in processing the central scene report. Forcing central scene to version 1."
-	getClasses().put(0x5B as Integer, 1 as Integer)
+	if (logEnable) log.warn "Version 2.2.4 of Hubitat has an error in processing the central scene and meter report. Forcing them to version 1."
+	if (deviceInclusters.contains(0x5B)) getClasses().put(0x5B as Integer, 1 as Integer)
+	if (deviceInclusters.contains(0x32)) getClasses().put(0x32 as Integer, 1 as Integer)	
 	
 	if (logEnable) log.debug "Device ${device.displayName}: Current classes for product key ${productKey()} are ${getClasses()}."
 	
@@ -1018,7 +1111,7 @@ Map getSupportedMeters()
 
 	if (getZwaveClassVersionMap().get(0x32 as Integer) != 1)
 	{
-		if (state.metersSupported.is( null ))
+		if (state.metersSupported.is( null ) || (state.metersSupported.size() == 0))
 		{
 			locked = meterReportMutex.tryAcquire(1, 10, TimeUnit.SECONDS)
 				sendToDevice(secure(zwave.meterV2.meterSupportedGet()))
@@ -1050,9 +1143,8 @@ void meterRefreshByTarget( ep = null )
 {
 	def targetDevice
 	if (ep) {
-		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
-		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
-	} else { targetDevice = device }	
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
+	} else { targetDevice = device }
 
 	if (getZwaveClassVersionMap()?.get(0x32 as Integer).is( null ))
 	{
@@ -1087,8 +1179,7 @@ void zwaveEvent(hubitat.zwave.commands.meterv5.MeterSupportedReport cmd, ep = nu
 void ProcessMeterSupportedReport (cmd, ep) {
 	def targetDevice
 	if (ep) {
-		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
-		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
 	} else { targetDevice = device }	
 
 	Map meterMap = getMeters()
@@ -1119,11 +1210,11 @@ void zwaveEvent(hubitat.zwave.commands.meterv3.MeterReport cmd, ep = null ) { pr
 void zwaveEvent(hubitat.zwave.commands.meterv4.MeterReport cmd, ep = null ) { processMeterReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.meterv5.MeterReport cmd, ep = null ) { processMeterReport(cmd, ep) }
 
-void processMeterReport( cmd, ep ) {
+void processMeterReport( cmd, ep ) 
+{
 	def targetDevice
 	if (ep) {
-		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
-		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
 	} else { targetDevice = device }	
 	
 	if (logEnable && cmd.hasProperty("rateType") && (cmd.rateType != 1)) log.warn "Device ${targetDevice.displayName}: Unexpected Meter rateType received. Value is: ${cmd.rateType}."
@@ -1171,7 +1262,7 @@ void processMeterReport( cmd, ep ) {
 			}
 		} catch (ex)
 		{
-			log.debug "Device ${targetDevice.displayName}: Error ${ex} processing report ${cmd}. Report is of class ${cmd.class}."
+			log.debug "Error ${ex} processing report ${cmd}. Report is of class ${cmd.class}."
 		}
 	} else {
 		log.warn "Device ${targetDevice.displayName}: Received unexpected meter type for ${targetDevice.displayName}. Only type '1' (Electric Meter) is supported. Received type: ${cmd.meterType}"
@@ -1270,8 +1361,7 @@ void processDeviceReport(cmd,  ep)
 {
 	def targetDevice
 	if (ep) {
-		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
-		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
 	} else { targetDevice = device }	
 
 	Boolean isSwitch = targetDevice.hasAttribute("switch") || targetDevice.hasCapability("Switch") || targetDevice.hasCapability("Bulb")  \
@@ -1457,8 +1547,7 @@ void processSensorMultilevelReport(cmd, ep)
 {
 	def targetDevice
 	if (ep) {
-		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
-		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
 	} else { targetDevice = device }	
 	
 	if (ep) log.warn "Device ${device.displayName}: Endpoint handling in report type SensorMultilevelReport is incomplete! Alert developer."
@@ -1551,9 +1640,8 @@ void processNotificationSupportedReport (cmd, ep )
 { 
 	def targetDevice
 	if (ep) {
-		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
-		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
-	} else { targetDevice = device }	
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
+	} else { targetDevice = device }		
 	
 	if (ep) log.warn "Device ${device.displayName}: Endpoint handling in report type NotificationSupportedReport is incomplete! Alert developer."
 
@@ -1586,8 +1674,7 @@ void processEventSupportedReport (cmd, ep )
 { 
 	def targetDevice
 	if (ep) {
-		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
-		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
 	} else { targetDevice = device }	
 	
 	if (ep) log.warn "Device ${device.displayName}: Endpoint handling in report type EventSupportedReport is incomplete! Alert developer."
@@ -1631,19 +1718,6 @@ void processEventSupportedReport (cmd, ep )
 	if (logEnable) log.debug "Device ${device.displayName}: Received Event Notification Supported Report: " + cmd 
 }
 
-void sendEventToAll(Map event)
-{
-	if (logEnable) log.debug "Device ${device.displayName}: processing event: " + event
-	if (logEnable) log.debug "Device ${device.displayName}: Device has attribute: ${event.name}: " + device.hasAttribute(event.name as String)
-	if (device.hasAttribute(event.name as String)) sendEvent(event)
-
-	getChildDevices()?.each{ child ->
-			if (logEnable) log.debug "Device ${device.displayName}: For child device ${child.displayName}, processing event: " + event
-			if (logEnable) log.debug "Device ${device.displayName}: Child device has attribute: ${event.name}: " + child.hasAttribute(event.name as String)
-			if (child.hasAttribute(event.name as String)) sendEvent(event)
-		}
-}
-
 // v1 and v2 are not implemented in Hubitat. 
 void zwaveEvent(hubitat.zwave.commands.notificationv3.NotificationReport cmd, ep = null)  { processNotificationReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.notificationv4.NotificationReport cmd, ep = null)  { processNotificationReport(cmd, ep) }
@@ -1655,9 +1729,8 @@ void processNotificationReport(cmd, ep)
 {
 	def targetDevice
 	if (ep) {
-		String endpointID = "${device.deviceNetworkId}-ep" + "${ep}".padLeft(3, "0")
-		targetDevice = childDevices.find{ it.deviceNetworkId == endpointID}
-	} else { targetDevice = device }	
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
+	} else { targetDevice = device }		
 	
 	if (ep) log.warn "Device ${device.displayName}: Endpoint handling in report type NotificationReport is incomplete! Alert developer."
 
