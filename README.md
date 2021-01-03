@@ -1,7 +1,23 @@
 # HubitatCustom
-### Version History and known Issues 0.0.6
+### What's New - Beta Version 0.0.7
 
-Scroll to the end to see a list of known issues and version history info!
+- Additional fixes for parameter settings were added.
+
+Version 0.0.7 adds rudimentary support for devices with multiple endpoints.  The following devices should work . . .
+* Zooz ZEN 16
+* Zooz ZEN 20
+* Zooz ZEN 25
+* Zooz ZEN 30
+* Inovelli LZW36 (partial - still working on the setSpeed controls
+
+To use a device with multiple endpoints:
+1. Install the driver on the Parent device
+2. Click on the Delete Child Devices control to get rid of child devices created by any old drivers
+3. Click on the Create Child Devices control. 
+4. Then reboot.
+
+
+Scroll to the end of this README to see a list of known issues and version history info!
 
 # Advanced Zwave Plus Dimmer driver  and Switch driver- Beta Releases!
 
