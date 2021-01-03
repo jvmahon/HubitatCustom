@@ -44,6 +44,7 @@ Some tips:
 * Bitmap inputs are poorly supported.
 
 # Version History
+0.0.7 - Numerous fixes for setting of parameters. Range checking on parameter inputs. Fixed errors in handling meter reports from devices with multiple endpoints. Additional support for multi-endpoint devices.
 0.0.6 - Numerous fixes for setting of parameters. Fix to avoid trying to set a "null" parameter. If currently stored paramenter is a "null" then try to re-get parameters on an Update.
 
 
