@@ -371,6 +371,11 @@ Integer getMajorVersion(String semVer)
 	}
 }
 
+void ResetDriverStateData()
+{
+	state.clear()
+}
+
 void cleanState()
 {
 	if (deleteAndResetStateData) state.clear()
