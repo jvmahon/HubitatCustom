@@ -1,7 +1,7 @@
 import java.util.concurrent.*;
 import groovy.transform.Field
 
-@Field static String driverVersion = "0.0.7"
+@Field static String driverVersion = "0.0.8"
 @Field static Boolean deleteAndResetStateData = false
 @Field static defaultParseMap = [
 	0x20:2, // Basic Set
@@ -70,7 +70,7 @@ import groovy.transform.Field
 ]
 
 metadata {
-	definition (name: "[Beta 0.0.7] Advanced Zwave Plus Metering Dimmer",namespace: "jvm", author: "jvm") {
+	definition (name: "[Beta 0.0.8] Advanced Zwave Plus Metering Dimmer",namespace: "jvm", author: "jvm") {
 			// capability "Configuration" // Does the same as Initialize, so don't show the separate control!
 			capability "Initialize"
 			capability "Refresh"
@@ -153,10 +153,6 @@ metadata {
         }
     }
 }
-void ResetDriverStateData()
-{
-	state.clear()
-}
 
 void deleteChildDevices()
 {
@@ -165,6 +161,7 @@ void deleteChildDevices()
 		deleteChildDevice(child.deviceNetworkId)
 	}
 }
+
 void createChildDevices()
 {	
 	Integer mfr = 	device.getDataValue("manufacturer").toInteger()
@@ -371,17 +368,23 @@ Integer getMajorVersion(String semVer)
 	}
 }
 
+void ResetDriverStateData()
+{
+	state.clear()
+}
+
 void cleanState()
 {
 	if (deleteAndResetStateData) state.clear()
 	if (getMajorVersion(state.driverVersionNum) != getMajorVersion(driverVersion)) state.clear() 
 
-	if (state.driverVersionNum == "0.0.1") state.clean()
-	if (state.driverVersionNum == "0.0.2") state.clean()
-	if (state.driverVersionNum == "0.0.3") state.clean()
-	if (state.driverVersionNum == "0.0.4") state.clean()
-	if (state.driverVersionNum == "0.0.5") state.clean()
-	if (state.driverVersionNum == "0.0.6") state.clean()	
+	if (state.driverVersionNum == "0.0.1") state.clear()
+	if (state.driverVersionNum == "0.0.2") state.clear()
+	if (state.driverVersionNum == "0.0.3") state.clear()
+	if (state.driverVersionNum == "0.0.4") state.clear()
+	if (state.driverVersionNum == "0.0.5") state.clear()
+	if (state.driverVersionNum == "0.0.6") state.clear()	
+	if (state.driverVersionNum == "0.0.7") state.clear()	    
 }
 
 void initialize()
@@ -738,7 +741,7 @@ void parse(String description) {
 	// The following 2 lines should only impact firmware gets that occur before the classes are obtained.
 	if (parseMap.is( null )) parseMap = [:]
 	if (!parseMap.containsKey(0x86 as Integer)) parseMap.put(0x86 as Integer, 1 as Integer)
-	if (!parseMap.containsKey(0x32 as Integer)) parseMap.put(0x32 as Integer, 1 as Integer)
+	if (!parseMap.containsKey(0x32 as Integer)) parseMap.put(0x32 as Integer, 2 as Integer)
 	if (logEnable) log.debug "Parsing description string: ${description}"
 		hubitat.zwave.Command cmd = zwave.parse(description, parseMap)
 
@@ -1103,27 +1106,24 @@ Map getMeters() {
 	return meterTypesSupported.get(key, [:])
 }
 
-
 Map getSupportedMeters()
 {
 	Boolean locked = false
 	Boolean processedReport = false
 
-	if (getZwaveClassVersionMap().get(0x32 as Integer) != 1)
+	Map meterInfo = getMeters()
+	Boolean alreadyHaveData = meterInfo.size() > 0
+	
+	if (! alreadyHaveData) 
 	{
-		if (state.metersSupported.is( null ) || (state.metersSupported.size() == 0))
-		{
-			locked = meterReportMutex.tryAcquire(1, 10, TimeUnit.SECONDS)
-				sendToDevice(secure(zwave.meterV2.meterSupportedGet()))
-			processedReport = meterReportMutex.tryAcquire(1, 10, TimeUnit.SECONDS)
-			if (! processedReport) log.warn "Device ${device.displayName}: Timeout Error - Failed to process Meter Get Report within 10 seconds of request to device."
-			meterReportMutex.release(1)
-		} else if (txtEnable) log.info "Device ${device.displayName}: Supported meter types are ${state.metersSupported}."
-		return getMeters()
-	} else {
-	if (logEnable) log.debug "Device ${device.displayName} supports obsolete Z-Wave Meter Command Class Version 1 which has  not been implemented!. For support, enter a report on driver github site."
-	return [:]
+		locked = meterReportMutex.tryAcquire(1, 10, TimeUnit.SECONDS)
+		sendToDevice(secure(zwave.meterV2.meterSupportedGet()))
+		processedReport = meterReportMutex.tryAcquire(1, 10, TimeUnit.SECONDS)
+		if (! processedReport) log.warn "Device ${device.displayName}: Timeout Error - Failed to process Meter Get Report within 10 seconds of request to device."
+		meterReportMutex.release(1)
 	}
+
+	return meterInfo
 }
 void meterReset() {
     if (txtEnable) log.info "Device ${device.displayName}: Resetting energy statistics"
@@ -1204,7 +1204,7 @@ void ProcessMeterSupportedReport (cmd, ep) {
 	meterReportMutex.release(1)
 }
 
-void zwaveEvent(hubitat.zwave.commands.meterv1.MeterReport cmd, ep = null ) { processMeterReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.meterv1.MeterReport cmd, ep = null ) { cmd.meterType = cmd.meterType & 0b00011111 ; processMeterReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.meterv2.MeterReport cmd, ep = null ) { processMeterReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.meterv3.MeterReport cmd, ep = null ) { processMeterReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.meterv4.MeterReport cmd, ep = null ) { processMeterReport(cmd, ep) }
@@ -1873,11 +1873,19 @@ void lockrefresh()
 }
 void lock()
 {
-   sendToDevice (secure( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 255) ))
+	List<hubitat.zwave.Command> cmds=[]
+	cmds << secure( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0xFF) )
+	cmds << "delay 4500"
+	cmds << secure( zwave.doorLockV1.doorLockOperationGet() )
+	sendToDevice(cmds)
 }
 void unlock()
 {
-   sendToDevice (secure( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0) )  )
+	List<hubitat.zwave.Command> cmds=[]
+	cmds << secure( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0x00) )
+	cmds << "delay 4500"
+	cmds << secure( zwave.doorLockV1.doorLockOperationGet() )
+	sendToDevice(cmds)
 }
 
 void deleteCode(codeposition)
