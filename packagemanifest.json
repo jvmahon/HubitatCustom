@@ -1,9 +1,9 @@
 {
   "packageName": "Advanced Universal Z-Wave Drivers",
   "author": "jvm",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "minimumHEVersion": "2.2.3",
-  "dateReleased": "2021-01-03",
+  "dateReleased": "2021-01-05",
   "drivers": [
     {
       "id": "4429838c-b709-426d-afc8-0fe8fbafdba7",
