@@ -1,6 +1,9 @@
 # HubitatCustom
-### What's New - Beta Version 0.0.7
+### What's New - Beta Version 0.0.8
+Version 0.0.8
+Fixes for lock reporting and meter reporting. Meter reporting (and central scene reporting) will be further revised after Hubitat 2.2.5 (currently, a bug exist in parsing meter and central scene reports which I understand will be fixed in the 2.2.5 release).
 
+Version 0.0.7
 - Additional fixes for parameter settings were added.
 
 Version 0.0.7 adds rudimentary support for devices with multiple endpoints.  The following devices should work . . .
