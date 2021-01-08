@@ -710,7 +710,7 @@ void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation c
         
 	// The following lines should only impact firmware gets that occur before the classes are obtained.
 	if (parseMap.is( null )) { parseMap = [:] }
-	if (!parseMap.containsKey(0x86 as Integer)) { parseMap.put(0x86 as Integer,  1 as Integer) }
+	// if (!parseMap.containsKey(0x86 as Integer)) { parseMap.put(0x86 as Integer,  1 as Integer) }
 	
 	hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap)
 	
@@ -727,7 +727,7 @@ void processMultichannelEncapsulatedCommand( cmd)
         
 	// The following lines should only impact firmware gets that occur before the classes are obtained.
 	if (parseMap.is( null )) { parseMap = [:] }
-	if (!parseMap.containsKey(0x86 as Integer)) { parseMap.put(0x86 as Integer,  1 as Integer) }
+	// if (!parseMap.containsKey(0x86 as Integer)) { parseMap.put(0x86 as Integer,  1 as Integer) }
 	
     def encapsulatedCommand = cmd.encapsulatedCommand(parseMap)
 
@@ -740,8 +740,8 @@ void parse(String description) {
 	Map parseMap = state.ZwaveClassVersions?.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
 	// The following 2 lines should only impact firmware gets that occur before the classes are obtained.
 	if (parseMap.is( null )) parseMap = [:]
-	if (!parseMap.containsKey(0x86 as Integer)) parseMap.put(0x86 as Integer, 1 as Integer)
-	if (!parseMap.containsKey(0x32 as Integer)) parseMap.put(0x32 as Integer, 2 as Integer)
+	// if (!parseMap.containsKey(0x86 as Integer)) parseMap.put(0x86 as Integer, 1 as Integer)
+	// if (!parseMap.containsKey(0x32 as Integer)) parseMap.put(0x32 as Integer, 2 as Integer)
 	if (logEnable) log.debug "Parsing description string: ${description}"
 		hubitat.zwave.Command cmd = zwave.parse(description, parseMap)
 
@@ -837,9 +837,10 @@ Map   getZwaveClassVersionMap(){
 			getClasses().put(it.key as Integer, it.value as Integer)
 		}
 	}
-	if (logEnable) log.warn "Version 2.2.4 of Hubitat has an error in processing the central scene and meter report. Forcing them to version 1."
-	if (deviceInclusters.contains(0x5B)) getClasses().put(0x5B as Integer, 1 as Integer)
-	if (deviceInclusters.contains(0x32)) getClasses().put(0x32 as Integer, 1 as Integer)	
+	
+	// if (logEnable) log.warn "Version 2.2.4 of Hubitat has an error in processing the central scene and meter report. Forcing them to version 1."
+	// if (deviceInclusters.contains(0x5B)) getClasses().put(0x5B as Integer, 1 as Integer)
+	// if (deviceInclusters.contains(0x32)) getClasses().put(0x32 as Integer, 1 as Integer)	
 	
 	if (logEnable) log.debug "Device ${device.displayName}: Current classes for product key ${productKey()} are ${getClasses()}."
 	
@@ -1884,6 +1885,7 @@ void lock()
 	cmds << secure( zwave.doorLockV1.doorLockOperationGet() )
 	sendToDevice(cmds)
 }
+
 void unlock()
 {
 	List<hubitat.zwave.Command> cmds=[]
