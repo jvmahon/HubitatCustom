@@ -70,7 +70,7 @@ import groovy.transform.Field
 ]
 
 metadata {
-	definition (name: "[Beta 0.0.8] Advanced Zwave Plus Metering Dimmer",namespace: "jvm", author: "jvm") {
+	definition (name: "[Beta 0.0.9] Advanced Zwave Plus Metering Dimmer",namespace: "jvm", author: "jvm") {
 			// capability "Configuration" // Does the same as Initialize, so don't show the separate control!
 			capability "Initialize"
 			capability "Refresh"
