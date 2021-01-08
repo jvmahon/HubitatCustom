@@ -1394,7 +1394,7 @@ void processDeviceReport(cmd,  ep)
 	if (isDimmer && turnedOn) // If it was turned off, that would be handle in the "isSwitch" block above.
 	{
 		// Don't send the event if the level doesn't change except if transitioning from off to on, always send!
-		if ((priorLevel != targetLevel) || (priorSwitchState != newSwitchSTate))
+		if ((priorLevel != targetLevel) || (priorSwitchState != newSwitchState))
 		{
 			targetDevice.sendEvent( 	name: "level", value: (newLevel == 99) ? 100 : newLevel, 
 					descriptionText: "Device ${targetDevice.displayName} level set to ${targetLevel}%", 
