@@ -1,7 +1,7 @@
 import java.util.concurrent.*;
 import groovy.transform.Field
 
-@Field static String driverVersion = "0.0.8"
+@Field static String driverVersion = "0.0.9"
 @Field static Boolean deleteAndResetStateData = false
 @Field static defaultParseMap = [
 	0x20:2, // Basic Set
@@ -1357,6 +1357,7 @@ void zwaveEvent(hubitat.zwave.commands.basicv2.BasicReport cmd, ep = null) 					
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv1.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv2.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
 void processDeviceReport(cmd,  ep)
 {
 	def targetDevice
@@ -1364,13 +1365,13 @@ void processDeviceReport(cmd,  ep)
 		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
 	} else { targetDevice = device }	
 
-	Boolean isSwitch = targetDevice.hasAttribute("switch") || targetDevice.hasCapability("Switch") || targetDevice.hasCapability("Bulb")  \
+	Boolean hasSwitch = targetDevice.hasAttribute("switch") || targetDevice.hasCapability("Switch") || targetDevice.hasCapability("Bulb")  \
 					|| targetDevice.hasCapability("Light") || targetDevice.hasCapability("Outlet")  || targetDevice.hasCapability("RelaySwitch")
-	Boolean isDimmer = targetDevice.hasAttribute("level")  || targetDevice.hasCapability("SwitchLevel")
+	Boolean hasDimmer = targetDevice.hasAttribute("level")  || targetDevice.hasCapability("SwitchLevel")
 	Boolean turnedOn = false
 	Integer newLevel = 0
 
-	if (cmd.hasProperty("duration")) //  Consider duration and target, but only when process a BasicReport Version 2
+	if (cmd.hasProperty("duration")) //  Consider duration and target, but only when process a BasicReport Version 2 or Multilevel v4
 	{
 		turnedOn = ((cmd.duration as Integer == 0 ) && ( cmd.value as Integer != 0 )) || ((cmd.duration as Integer != 0 ) && (cmd.targetValue as Integer != 0 ))
 		newLevel = ((cmd.duration as Integer == 0 ) ? cmd.value : cmd.targetValue ) as Integer
@@ -1384,26 +1385,30 @@ void processDeviceReport(cmd,  ep)
 	Integer priorLevel = targetDevice.currentValue("level")
 	Integer targetLevel = ((newLevel == 99) ? 100 : newLevel)
 	
-    if (isSwitch && (priorSwitchState != newSwitchState))
+	if ((priorLevel == 99) && (newLevel == 99)) { targetLevel = 99 }
+		else if ((priorLevel == 100)) && (newLevel == 99)) { targetLevel = 100 }
+			else targetLevel = newLevel
+	
+    if (hasSwitch && (priorSwitchState != newSwitchState))
 	{
 		targetDevice.sendEvent(	name: "switch", value: newSwitchState, 
 						descriptionText: "Device ${targetDevice.displayName} set to ${newSwitchState}.", 
 						type: isDigitalEvent() ? "digital" : "physical" )
 		if (txtEnable) log.info "Device ${targetDevice.displayName} set to ${newSwitchState}."
 	}
-	if (isDimmer && turnedOn) // If it was turned off, that would be handle in the "isSwitch" block above.
+	if (hasDimmer && turnedOn) // If it was turned off, that would be handle in the "hasSwitch" block above.
 	{
 		// Don't send the event if the level doesn't change except if transitioning from off to on, always send!
-		if ((priorLevel != targetLevel) || (priorSwitchState != newSwitchSTate))
+		if ((priorLevel != targetLevel) || (priorSwitchState != newSwitchState))
 		{
-			targetDevice.sendEvent( 	name: "level", value: (newLevel == 99) ? 100 : newLevel, 
+			targetDevice.sendEvent( 	name: "level", value: targetLevel, 
 					descriptionText: "Device ${targetDevice.displayName} level set to ${targetLevel}%", 
 					type: isDigitalEvent() ? "digital" : "physical" )
 			if (txtEnable) log.info "Device ${targetDevice.displayName} level set to ${targetLevel}%"		
 		}
 	}
 
-	if (!isSwitch && !isDimmer) log.warn "For device ${targetDevice.displayName} receive a BasicReport which wasn't processed. Need to check BasicReport handling code." + cmd
+	if (!hasSwitch && !hasDimmer) log.warn "For device ${targetDevice.displayName} receive a BasicReport which wasn't processed. Need to check BasicReport handling code." + cmd
 	setIsDigitalEvent( false )
 }
 
