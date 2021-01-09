@@ -1387,7 +1387,7 @@ void processDeviceReport(cmd,  ep)
 	Integer targetLevel = ((newLevel == 99) ? 100 : newLevel)
 	
 	if ((priorLevel == 99) && (newLevel == 99)) { targetLevel = 99 }
-		else if ((priorLevel == 100)) && (newLevel == 99)) { targetLevel = 100 }
+		else if ((priorLevel == 100) && (newLevel == 99)) { targetLevel = 100 }
 			else targetLevel = newLevel
 	
     if (hasSwitch && (priorSwitchState != newSwitchState))
