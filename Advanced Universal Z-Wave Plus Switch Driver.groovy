@@ -1,7 +1,7 @@
 import java.util.concurrent.*;
 import groovy.transform.Field
 
-@Field static String driverVersion = "0.0.8"
+@Field static String driverVersion = "0.0.9"
 @Field static Boolean deleteAndResetStateData = false
 @Field static defaultParseMap = [
 	0x20:2, // Basic Set
@@ -70,14 +70,14 @@ import groovy.transform.Field
 ]
 
 metadata {
-	definition (name: "[Beta 0.0.8] Advanced Zwave Plus Metering Switch",namespace: "jvm", author: "jvm") {
+	definition (name: "[Beta 0.0.9] Advanced Zwave Plus Metering Switch",namespace: "jvm", author: "jvm") {
 			// capability "Configuration" // Does the same as Initialize, so don't show the separate control!
 			capability "Initialize"
 			capability "Refresh"
 		
  		// For switches and dimmers!
 			capability "Switch"	
-		//    capability "SwitchLevel"
+		    // capability "SwitchLevel"
 			
 		// Does anybody really use the "Change Level" controls? If so, uncomment it!
 		//	capability "ChangeLevel"
@@ -710,7 +710,7 @@ void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation c
         
 	// The following lines should only impact firmware gets that occur before the classes are obtained.
 	if (parseMap.is( null )) { parseMap = [:] }
-	if (!parseMap.containsKey(0x86 as Integer)) { parseMap.put(0x86 as Integer,  1 as Integer) }
+	// if (!parseMap.containsKey(0x86 as Integer)) { parseMap.put(0x86 as Integer,  1 as Integer) }
 	
 	hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap)
 	
@@ -727,7 +727,7 @@ void processMultichannelEncapsulatedCommand( cmd)
         
 	// The following lines should only impact firmware gets that occur before the classes are obtained.
 	if (parseMap.is( null )) { parseMap = [:] }
-	if (!parseMap.containsKey(0x86 as Integer)) { parseMap.put(0x86 as Integer,  1 as Integer) }
+	// if (!parseMap.containsKey(0x86 as Integer)) { parseMap.put(0x86 as Integer,  1 as Integer) }
 	
     def encapsulatedCommand = cmd.encapsulatedCommand(parseMap)
 
@@ -740,8 +740,8 @@ void parse(String description) {
 	Map parseMap = state.ZwaveClassVersions?.collectEntries{k, v -> [(k as Integer) : (v as Integer)]}
 	// The following 2 lines should only impact firmware gets that occur before the classes are obtained.
 	if (parseMap.is( null )) parseMap = [:]
-	if (!parseMap.containsKey(0x86 as Integer)) parseMap.put(0x86 as Integer, 1 as Integer)
-	if (!parseMap.containsKey(0x32 as Integer)) parseMap.put(0x32 as Integer, 2 as Integer)
+	// if (!parseMap.containsKey(0x86 as Integer)) parseMap.put(0x86 as Integer, 1 as Integer)
+	// if (!parseMap.containsKey(0x32 as Integer)) parseMap.put(0x32 as Integer, 2 as Integer)
 	if (logEnable) log.debug "Parsing description string: ${description}"
 		hubitat.zwave.Command cmd = zwave.parse(description, parseMap)
 
@@ -837,9 +837,10 @@ Map   getZwaveClassVersionMap(){
 			getClasses().put(it.key as Integer, it.value as Integer)
 		}
 	}
-	if (logEnable) log.warn "Version 2.2.4 of Hubitat has an error in processing the central scene and meter report. Forcing them to version 1."
-	if (deviceInclusters.contains(0x5B)) getClasses().put(0x5B as Integer, 1 as Integer)
-	if (deviceInclusters.contains(0x32)) getClasses().put(0x32 as Integer, 1 as Integer)	
+	
+	// if (logEnable) log.warn "Version 2.2.4 of Hubitat has an error in processing the central scene and meter report. Forcing them to version 1."
+	// if (deviceInclusters.contains(0x5B)) getClasses().put(0x5B as Integer, 1 as Integer)
+	// if (deviceInclusters.contains(0x32)) getClasses().put(0x32 as Integer, 1 as Integer)	
 	
 	if (logEnable) log.debug "Device ${device.displayName}: Current classes for product key ${productKey()} are ${getClasses()}."
 	
@@ -1357,6 +1358,7 @@ void zwaveEvent(hubitat.zwave.commands.basicv2.BasicReport cmd, ep = null) 					
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv1.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv2.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
 void processDeviceReport(cmd,  ep)
 {
 	def targetDevice
@@ -1364,13 +1366,13 @@ void processDeviceReport(cmd,  ep)
 		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
 	} else { targetDevice = device }	
 
-	Boolean isSwitch = targetDevice.hasAttribute("switch") || targetDevice.hasCapability("Switch") || targetDevice.hasCapability("Bulb")  \
+	Boolean hasSwitch = targetDevice.hasAttribute("switch") || targetDevice.hasCapability("Switch") || targetDevice.hasCapability("Bulb")  \
 					|| targetDevice.hasCapability("Light") || targetDevice.hasCapability("Outlet")  || targetDevice.hasCapability("RelaySwitch")
-	Boolean isDimmer = targetDevice.hasAttribute("level")  || targetDevice.hasCapability("SwitchLevel")
+	Boolean hasDimmer = targetDevice.hasAttribute("level")  || targetDevice.hasCapability("SwitchLevel")
 	Boolean turnedOn = false
 	Integer newLevel = 0
 
-	if (cmd.hasProperty("duration")) //  Consider duration and target, but only when process a BasicReport Version 2
+	if (cmd.hasProperty("duration")) //  Consider duration and target, but only when process a BasicReport Version 2 or Multilevel v4
 	{
 		turnedOn = ((cmd.duration as Integer == 0 ) && ( cmd.value as Integer != 0 )) || ((cmd.duration as Integer != 0 ) && (cmd.targetValue as Integer != 0 ))
 		newLevel = ((cmd.duration as Integer == 0 ) ? cmd.value : cmd.targetValue ) as Integer
@@ -1384,26 +1386,30 @@ void processDeviceReport(cmd,  ep)
 	Integer priorLevel = targetDevice.currentValue("level")
 	Integer targetLevel = ((newLevel == 99) ? 100 : newLevel)
 	
-    if (isSwitch && (priorSwitchState != newSwitchState))
+	if ((priorLevel == 99) && (newLevel == 99)) { targetLevel = 99 }
+		else if ((priorLevel == 100) && (newLevel == 99)) { targetLevel = 100 }
+			else targetLevel = newLevel
+	
+    if (hasSwitch && (priorSwitchState != newSwitchState))
 	{
 		targetDevice.sendEvent(	name: "switch", value: newSwitchState, 
 						descriptionText: "Device ${targetDevice.displayName} set to ${newSwitchState}.", 
 						type: isDigitalEvent() ? "digital" : "physical" )
 		if (txtEnable) log.info "Device ${targetDevice.displayName} set to ${newSwitchState}."
 	}
-	if (isDimmer && turnedOn) // If it was turned off, that would be handle in the "isSwitch" block above.
+	if (hasDimmer && turnedOn) // If it was turned off, that would be handle in the "hasSwitch" block above.
 	{
 		// Don't send the event if the level doesn't change except if transitioning from off to on, always send!
-		if ((priorLevel != targetLevel) || (priorSwitchState != newSwitchSTate))
+		if ((priorLevel != targetLevel) || (priorSwitchState != newSwitchState))
 		{
-			targetDevice.sendEvent( 	name: "level", value: (newLevel == 99) ? 100 : newLevel, 
+			targetDevice.sendEvent( 	name: "level", value: targetLevel, 
 					descriptionText: "Device ${targetDevice.displayName} level set to ${targetLevel}%", 
 					type: isDigitalEvent() ? "digital" : "physical" )
 			if (txtEnable) log.info "Device ${targetDevice.displayName} level set to ${targetLevel}%"		
 		}
 	}
 
-	if (!isSwitch && !isDimmer) log.warn "For device ${targetDevice.displayName} receive a BasicReport which wasn't processed. Need to check BasicReport handling code." + cmd
+	if (!hasSwitch && !hasDimmer) log.warn "For device ${targetDevice.displayName} receive a BasicReport which wasn't processed. Need to check BasicReport handling code." + cmd
 	setIsDigitalEvent( false )
 }
 
@@ -1879,6 +1885,7 @@ void lock()
 	cmds << secure( zwave.doorLockV1.doorLockOperationGet() )
 	sendToDevice(cmds)
 }
+
 void unlock()
 {
 	List<hubitat.zwave.Command> cmds=[]
