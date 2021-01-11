@@ -37,7 +37,7 @@ import groovy.transform.Field
 @Field static Map switchValues = [0:"off",1:"on"]
 
 metadata {
-    definition (name: "Generic Z-Wave CentralScene Dimmer",namespace: "hubitat", author: "Mike Maxwell") {
+    definition (name: "[Modified] Generic Z-Wave CentralScene Dimmer",namespace: "hubitat", author: "Mike Maxwell") {
         capability "Actuator"
         capability "Switch"
         capability "Switch Level"
@@ -139,14 +139,20 @@ void zwaveEvent(hubitat.zwave.commands.centralscenev1.CentralSceneNotification c
             action = "pushed"
             break
         case 1:	//released, only after 2
+			if (state."${button}" == 1) unschedule(forceRelease) //If you are in the held state, but get a "real" release, unschedule the forcing function!
             state."${button}" = 0
             action = "released"
             break
         case 2:	//holding
             if (state."${button}" == 0){
-                state."${button}" = 1
-                runIn(60,delayHold,[data:button])
-            }
+				action = "held" // The first time you get a held, send the held
+                state."${button}" = 1 // But track the state you're in 1 = in a hold state
+            } else { 
+				// If you get another held, then that is from the Z-wave "refresh", so don't send again.
+				// But if you haven't gotten a release in 60 seconds (slow refresh period = 59 seconds), you missed the release, 
+				// so fake a release using the forceRelease function!
+							    runIn(60,forceRelease,[data:button]) 
+			}
             break
         case 3:	//double tap, 4 is tripple tap
             action = "doubleTapped"
@@ -228,8 +234,14 @@ void dimmerEvents(rawValue,type){
     state.bin = -1
 }
 
+/*
 void delayHold(button){
     sendButtonEvent("held", button, "physical")
+}
+*/
+void forceRelease(button){
+    sendButtonEvent("released", button, "physical")
+	state."${button}" = 0
 }
 
 void push(button){
