@@ -21,21 +21,21 @@ List<String> commands(List<hubitat.zwave.Command> cmds, Long delay=200) { return
 
 void test()
 {
-	Integer session = 32 * Math.random() // just use a random number for testing!
+   Integer session = 32 * Math.random() // For testing purposes, us a random number for Supervision session ID testing!
+	
     def cmd = zwave.basicV1.basicSet(value:50)
     log.debug "Command is: " + cmd
     log.debug "Formatted original command: " + cmd.format() // This works fine.
-	log.debug "Command after security encapsulation is: " + secure(cmd)
-
 	
     def supervised = zwave.supervisionV1.supervisionGet(sessionID: session , statusUpdates: false, commandClassIdentifier: cmd.commandClassId , commandIdentifier: cmd.commandId , commandLength: (2 + cmd.payload.size()), commandByte: cmd.payload)
     log.debug "Supervised Command is: " + supervised
+    log.debug "Formatted Supervised Command is: " + supervised.format()
 	
-	def secured = secure(supervised)
-	log.debug "Supervised command after security encapsulation: "  + secured
+    def secured = secure(supervised)
+    log.debug "Supervised command after security encapsulation: "  + secured
     log.debug "Formatted secured command: " + secured.format() // This generates a null pointer error!
 	
-	sendToDevice(secured)
+    sendToDevice(secured)
 }
 
 void zwaveEvent(hubitat.zwave.Command cmd) {
