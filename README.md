@@ -1,4 +1,8 @@
 # HubitatCustom
+
+## Current Plans . . .
+I'm currently revising the code to simplify some of it and make it a bit more modular / re-usable. I've hit some snags due to platform bugs, but most (if not all) of these should be fixed in the 2.2.5 Hubitat release and I can get back to improving this driver -- so expect an update a few weeks after the 2.2.5 release.
+
 ### What's New - Beta Version 0.0.8
 Version 0.0.8
 Fixes for lock reporting and meter reporting. Meter reporting (and central scene reporting) will be further revised after Hubitat 2.2.5 (currently, a bug exist in parsing meter and central scene reports which I understand will be fixed in the 2.2.5 release).
