@@ -74,8 +74,8 @@ hubitat.zwave.Command  getCachedSensorMultilevelSupportedSensorReport()
 
 */
 
-@Field static ConcurrentHashMap<String, ConcurrentHashMap> reportCacheByFirmware = new ConcurrentHashMap<String, ConcurrentHashMap>(16)
-@Field static ConcurrentHashMap<String, ConcurrentHashMap> reportCacheByDNI = new ConcurrentHashMap<String, ConcurrentHashMap>(64)
+@Field static ConcurrentHashMap<String, ConcurrentHashMap> reportCacheByFirmware = new ConcurrentHashMap<String, ConcurrentHashMap>(32)
+@Field static ConcurrentHashMap<String, ConcurrentHashMap> versionReportCache = new ConcurrentHashMap<String, ConcurrentHashMap>(64)
 
 @Field static Semaphore gettingReports = new Semaphore(32)
 
@@ -96,10 +96,10 @@ String firmwareKey(String firmwareReport)
 {
 	String key
 	hubitat.zwave.Command   version = getCachedVersionReport() 
-	log.debug "Version report in firmwareKey is: " + version
-	log.debug "version format is: " + version?.format()
+	// log.debug "Version report in firmwareKey is: " + version
+	// log.debug "version format is: " + version?.format()
 	if (!version)  {
-			log.debug "called firmwareKey function but firmware version is not yet cached! Using only device and manufacturer information."
+			log.warn "called firmwareKey function but firmware version is not yet cached! Using only device and manufacturer information."
 			return productKey()
 		} else {
 			return productKey() + version?.format()
@@ -130,12 +130,12 @@ log.debug "Called classLevel with class value ${checkClass}. This function is cu
 Boolean cachedReportExists(String reportClass, Short index  = null )
 {
     if (index) log.warn "EndPoint / Indexed Map Support in cachedReportExists is not fully implemented! Does not support this function function"
+	if ( reportClass == "8611") return false // Always force firmwareversion to be retrieved as this starts cycle of retrieving other reports!
 
-	ConcurrentHashMap DNIStorage = reportCacheByDNI.get(device.getDeviceNetworkId())
 	ConcurrentHashMap ByFirmwareStorage = reportCacheByFirmware.get(firmwareKey())
 	
-	log.debug "value of deviceStorage in cachedReportExists is: " + deviceStorage
-	if ( DNIStorage?.containsKey(reportClass) || ByFirmwareStorage?.containsKey(reportClass) ) {
+	// log.debug "value of ByFirmwareStorage in cachedReportExists is: " + ByFirmwareStorage
+	if ( ByFirmwareStorage?.containsKey(reportClass) ) {
 		log.debug "A cached report already exists for report class: ${reportClass}!"
 		return true
 	} else {
@@ -146,27 +146,6 @@ Boolean cachedReportExists(String reportClass, Short index  = null )
 
 ///   Functions to store and retrieve Z-Wave reports from the concurrent Hash Maps ///
 ///  The reports are stored as a hex string which is obtained from cmd.format()    ///
-
-void cacheReportByNetworkID(hubitat.zwave.Command cmd, ep = null )
-{
-	ConcurrentHashMap deviceStorage = reportCacheByDNI.get((device.getDeviceNetworkId()), new ConcurrentHashMap() )
-	log.debug "deviceStorage for device ${device.displayName} is: " + deviceStorage
-	if (deviceStorage.containsKey(cmd.CMD)){
-		deviceStorage.replace(cmd.CMD, cmd)
-	} else 	{
-		deviceStorage.put(cmd.CMD, cmd)
-	}
-}
-
-hubitat.zwave.Command  getCachedReportByNetworkID(String reportClass, ep = null )
-{
-	ConcurrentHashMap deviceStorage = reportCacheByDNI.get(device.getDeviceNetworkId() as String)
-	if (deviceStorage.is( null ) || (deviceStorage.size() == 0)) 
-		{
-			return null
-		}
-	return deviceStorage.get(reportClass)
-}
 
 void cacheReportByFirmwareVersion(hubitat.zwave.Command cmd, ep = null )
 {
@@ -189,7 +168,14 @@ hubitat.zwave.Command  getCachedReportByFirmwareVersion(String reportClass, ep =
 
 void cacheDeviceReport(String command, ep = null )
 {
-    if (cachedReportExists(command, ep))  { log.debug "Already have cached report for ${command}."; return }
+	Integer reportNumber = hubitat.helper.HexUtils.hexStringToInt(command) + 1
+	String reportHexString = hubitat.helper.HexUtils.integerToHexString(reportNumber, 2)
+	log.debug "In cacheDeviceReport report string is ${reportHexString} for command ${command}."; 
+
+    if (cachedReportExists(reportHexString, ep))  { 
+			log.debug "Already have cached report ${reportHexString} for command ${command}."; 
+			return 
+		}
     
 	// waitForReport.tryAcquire(1, 10, TimeUnit.SECONDS )
 
@@ -202,7 +188,7 @@ void cacheDeviceReport(String command, ep = null )
 void getSupportedReports(ep = null )
 {
 	//  Get the Version Report
-	cacheDeviceReport("8611")
+		sendToDevice(secure( zwave.versionV3.versionGet() ))
 	
 	// Everything else is retrieved from the Version Report handler by calling getOtherReports()
 }
@@ -213,7 +199,7 @@ synchronized void getOtherReports(ep = null )
 	
 	// MultiChannelEndPointReport Get:0x6007  Report:0x6008
 	if (implementsZwaveClass(0x60)) cacheDeviceReport("6007") // Request is only sent to the parent. Don't add ep = null!
-		
+	
 	// CentralSceneSupportedReport Get:0x5B01  Report:0x5B02
 	// Per standards, Central Scene should never have an endpoint!
 	if (implementsZwaveClass(0x5B)) cacheDeviceReport("5B01")
@@ -306,25 +292,24 @@ synchronized void getOtherReports(ep = null )
 void logStoredReportCache()
 {
 	log.debug "report cache for items stored based on firmware version is: " + reportCacheByFirmware
-	log.debug "report cache for items stored based on DNI is: " + reportCacheByDNI
+	log.debug "versionReportCache stored based on DNI is: " + versionReportCache
 }
 
 /////////////////  Caching Functions To Store Reports! //////////////////////////////
-void zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) { cacheReportByDeviceNetworkID (cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) { cacheReportByDeviceNetworkID (cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) { cacheReportByDeviceNetworkID (cmd, ep) }
-void  cacheReportByDeviceNetworkID (cmd, ep = null )
-{
-	// The information cached here is common to all devices with the same manufacturere / device type / device ID  code and firmware version.
-	if (ep) log.debug "Endpoint Functionality Not Implemented for report caching"
-	log.debug "Received report for caching by Network ID with command string ${cmd.CMD} and format ${cmd.format()}"
-	cacheReportByNetworkID(cmd, ep)
-	// waitForReport.release(1)
-	getOtherReports()
 
+void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) { 
+	log.debug "Received and saving a VersionReport: ${cmd}"
+	if (versionReportCache.containsKey(device.getDeviceNetworkId()) ) {
+			log.debug "Already have a stored version report! Replacing it ..."
+			versionReportCache.replace( device.getDeviceNetworkId(), cmd)
+		} else {
+			versionReportCache.put( device.getDeviceNetworkId(), cmd) 
+		}
+	getOtherReports()
 }
 
-hubitat.zwave.Command  getCachedVersionReport(){ return (getCachedReportByNetworkID("8612"))}
+hubitat.zwave.Command  getCachedVersionReport() { return versionReportCache.get( device.getDeviceNetworkId() )}
+
 // //////////////////////////////////////////////////////////////////////
 void zwaveEvent(hubitat.zwave.commands.centralscenev1.CentralSceneSupportedReport  cmd)  			{ cacheReportByFirmwareVersion (cmd) }
 void zwaveEvent(hubitat.zwave.commands.centralscenev2.CentralSceneSupportedReport  cmd)  			{ cacheReportByFirmwareVersion (cmd) }
@@ -416,7 +401,7 @@ void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelEndPointReport
 	cacheReportByFirmwareVersion (cmd) 
 	for( Short ep = 1; ep <= cmd.endPoints; ep++)
 	{
-		log.debug "Iterating through MultiChannelEndPointReport for endpoint: ${ep}."
+		// log.debug "Iterating through MultiChannelEndPointReport for endpoint: ${ep}."
 		sendToDevice(secure(zwave.multiChannelV4.multiChannelCapabilityGet(endPoint: ep)))
 	}
 }
@@ -544,7 +529,6 @@ void processMultichannelEncapsulatedCommand( cmd)
 ////    Z-Wave Message Parsing   ////
 void parse(String description) {
 	hubitat.zwave.Command cmd = zwave.parse(description, defaultParseMap)
-	if (logEnable) log.debug "in parse() received description ${description} and generated command ${cmd} of class ${cmd.class}."
     if (cmd) { zwaveEvent(cmd) }
 }
 
