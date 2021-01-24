@@ -1,13 +1,24 @@
-import java.util.concurrent.*;
+import java.util.concurrent.* // Available (whitlisted) concurrency classes: ConcurrentHashMap, ConcurrentLinkedQueue, Semaphore, Synchronousqueue
 import groovy.transform.Field
 
-/*  Available (whitlisted) concurrency classes:
-	ConcurrentHashMap
-	ConcurrentLinkedQueue
-	Semaphore
-	Synchronousqueue
-*/
-
+metadata {
+	definition (name: "[Beta Version 2] Cache Reports",namespace: "jvm", author: "jvm") {
+		capability "Configuration"
+		capability "Initialize"
+		capability "Refresh"
+		command "getSupportedReports"
+		command "logStoredReportCache"
+        command "getSessionID"
+        command "turnOn"
+		command "showCommandClassReport"
+		command "clearState"
+    }
+    preferences 
+	{
+		input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
+		input name: "txtEnable", type: "bool", title: "Enable text logging", defaultValue: true
+    }
+}
 
 @Field static Map<Integer, Integer> defaultParseMap = [
 	0x20:2, // Basic Set
@@ -28,25 +39,43 @@ import groovy.transform.Field
 	0x87:3  // Indicator
 	]
 
-metadata {
-	definition (name: "[Beta Version 2] Cache Reports",namespace: "jvm", author: "jvm") {
-		capability "Configuration"
-		capability "Initialize"
-		command "getSupportedReports"
-		command "logStoredReportCache"
-        command "getSessionID"
-        command "turnOn"
-    }
-    preferences 
-	{
-		input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
-		input name: "txtEnable", type: "bool", title: "Enable text logging", defaultValue: true
-    }
-}
-
 void turnOn()
 {
 	sendToDevice(secure(supervise(zwave.basicV1.basicSet(value: 0xFF))))
+}
+void clearState()
+{
+	state.clear()
+}
+
+void endpointRefresh(ep = null )
+{
+	List<hubitat.zwave.Command> cmds = []
+		if (implementsZwaveClass(0x25, ep)) cmds << secure(zwave.switchBinaryV2.switchBinaryGet(), ep)
+		if (implementsZwaveClass(0x28, ep)) cmds << secure(zwave.switchToggleBinaryV1.switchToggleBinaryGet(), ep)
+		if (implementsZwaveClass(0x26, ep)) cmds << secure(zwave.switchMultilevelv1.switchMultilevelGet(), ep)
+		// if (implementsZwaveClass(0x20, ep)) cmds << secure(zwave.basicV1.basicGet(), ep)
+		if (implementsZwaveClass(0x62, ep)) cmds << secure(zwave.doorlockV1.doorLockOperationGet(), ep)
+		if (implementsZwaveClass(0x76, ep)) cmds << secure(zwave.lockV1.lockGet(), ep)
+
+		if (implementsZwaveClass(0x80, ep)) cmds << secure(zwave.batteryV1.batteryGet())
+		if (implementsZwaveClass(0x81, ep)) cmds << secure(zwave.clockV1.clockGet())
+	log.debug "Refreshing with commands: " + cmds
+	if (cmds) sendToDevice(cmds)
+}
+
+void refresh()
+{
+	if (implementsZwaveClass(0x60))
+	{
+		hubitat.zwave.Command  report = getCachedMultiChannelEndPointReport()
+		for ( Short ep = 1; ep <= report.endPoints; ep++)
+		{
+			endpointRefresh(ep)
+		}
+	} else {
+		endpointRefresh()
+	}
 }
 
 
@@ -72,17 +101,19 @@ hubitat.zwave.Command  getCachedProtectionSupportedReport()
 hubitat.zwave.Command  getCachedSwitchMultilevelSupportedReport()
 hubitat.zwave.Command  getCachedSensorMultilevelSupportedSensorReport()
 
+Map getCachedVersionCommandClassReport()
+
 */
+
+void showCommandClassReport()
+{
+	log.debug "Command Class Report is: " + getCachedVersionCommandClassReport()
+}
 
 @Field static ConcurrentHashMap<String, ConcurrentHashMap> reportCacheByFirmware = new ConcurrentHashMap<String, ConcurrentHashMap>(32)
 @Field static ConcurrentHashMap<String, ConcurrentHashMap> versionReportCache = new ConcurrentHashMap<String, ConcurrentHashMap>(64)
 
-@Field static Semaphore gettingReports = new Semaphore(32)
-
-
-
 ///   Functions to generate keys used to access the concurrent Hash Maps ///
-
 String productKey()
 {
 	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
@@ -108,26 +139,25 @@ String firmwareKey(String firmwareReport)
 
 ///   Functions to Test if classes are implemented by the device ///
 
-Boolean implementsZwaveClass( Integer zwaveCommandClass, ep = null )
+Boolean implementsZwaveClass(zwaveCommandClass, ep = null )
 {
+// log.debug "called implementsZwaveClass for class: ${zwaveCommandClass}, and endpoint ${ep}."
 	if (ep)
 	{
-		log.debug "implementsZwaveClass() code is incomplete. Endpoint checking not supported!"
+		hubitat.zwave.Command cmd = getCachedMultiChannelCapabilityReport(ep as Short)
+		return cmd.commandClass.contains(zwaveCommandClass as Short) 
 	} else {
-		List<Integer> 	deviceInclusters = getDataValue("inClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Integer }
-					deviceInclusters += getDataValue("secureInClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Integer }
-					if (!deviceInclusters.contains(32)) deviceInclusters += 32
-		return deviceInclusters.contains(zwaveCommandClass)
+		// log.debug "Does it contain the class: " + getCachedVersionCommandClassReport()?.containsKey(zwaveCommandClass as Short)
+		return getCachedVersionCommandClassReport()?.containsKey(zwaveCommandClass as Short)
 	}
 }
 
-Integer classLevel(Integer checkClass)
+Short classLevel(zwaveCommandClass)
 {
-log.debug "Called classLevel with class value ${checkClass}. This function is currently a stub that always returns 16."
-	return 16
+	return getCachedVersionCommandClassReport().get(zwaveCommandClass as Short)
 }
 
-Boolean cachedReportExists(String reportClass, Short index  = null )
+Boolean cachedReportExists(String reportClass, index  = null )
 {
     if (index) log.warn "EndPoint / Indexed Map Support in cachedReportExists is not fully implemented! Does not support this function function"
 	if ( reportClass == "8611") return false // Always force firmwareversion to be retrieved as this starts cycle of retrieving other reports!
@@ -147,6 +177,7 @@ Boolean cachedReportExists(String reportClass, Short index  = null )
 ///   Functions to store and retrieve Z-Wave reports from the concurrent Hash Maps ///
 ///  The reports are stored as a hex string which is obtained from cmd.format()    ///
 
+
 void cacheReportByFirmwareVersion(hubitat.zwave.Command cmd, ep = null )
 {
 	if (ep) { log.warn "Code Error in function cacheReportByFirmwareVersion, Endpoint unexpected for command ${cmd}."}
@@ -158,7 +189,15 @@ void cacheReportByFirmwareVersion(hubitat.zwave.Command cmd, ep = null )
 		deviceStorage.put(cmd.CMD, cmd)
 	}
 }
-
+/*
+void cacheReportByFirmwareVersion(hubitat.zwave.Command cmd, Short index = null )
+{
+	ConcurrentHashMap deviceStorage = reportCacheByFirmware.get(firmwareKey(), new ConcurrentHashMap())
+	ConcurrentHashMap indexedMap = deviceStorage.get(cmd.CMD, new ConcurrentHashMap())
+	log.debug "IndexedMap for device ${device.displayName} is: " + indexedMap
+	indexedMap.put( (index ?: 0 ), cmd)
+}
+*/
 hubitat.zwave.Command  getCachedReportByFirmwareVersion(String reportClass, ep = null )
 {
 	ConcurrentHashMap deviceStorage = reportCacheByFirmware.get(firmwareKey())
@@ -170,31 +209,78 @@ void cacheDeviceReport(String command, ep = null )
 {
 	Integer reportNumber = hubitat.helper.HexUtils.hexStringToInt(command) + 1
 	String reportHexString = hubitat.helper.HexUtils.integerToHexString(reportNumber, 2)
-	log.debug "In cacheDeviceReport report string is ${reportHexString} for command ${command}."; 
-
     if (cachedReportExists(reportHexString, ep))  { 
-			log.debug "Already have cached report ${reportHexString} for command ${command}."; 
+			// log.debug "Already have cached report ${reportHexString} for command ${command}."; 
 			return 
 		}
-    
-	// waitForReport.tryAcquire(1, 10, TimeUnit.SECONDS )
-
 	log.debug "Sending to device ${device.displayName} the command string: ${command}."
 	sendToDevice(secure(command))
-	// waitForReport.tryAcquire(1, 10, TimeUnit.SECONDS )
-	// waitForReport.release(1)
+
 }
 
-void getSupportedReports(ep = null )
+@Field static Semaphore versionGetSemaphor = new Semaphore(1)
+
+synchronized void getSupportedReports(ep = null )
 {
-	//  Get the Version Report
+	//  Get the Version Report then everything else is retrieved from the Version Report handler by calling getOtherReports()
+	versionGetSemaphor.tryAcquire(1, 5, TimeUnit.SECONDS)
+
 		sendToDevice(secure( zwave.versionV3.versionGet() ))
-	
-	// Everything else is retrieved from the Version Report handler by calling getOtherReports()
+	Boolean success = versionGetSemaphor.tryAcquire(1, 5, TimeUnit.SECONDS)
+	log.debug "Acquired firmware version success = ${success}."
+	versionGetSemaphor.release(1)
+
+}
+
+@Field static Semaphore getClassVersionReportSemaphors = new Semaphore(32)
+
+void 	getCommandClassVersionReports()
+{
+		List<Integer> 	deviceClasses = getDataValue("inClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Integer }
+					deviceClasses += getDataValue("secureInClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Integer }
+					if (!deviceClasses.contains(32)) deviceClasses += 32
+		
+		List<hubitat.zwave.Command> cmds = []
+		deviceClasses.each{
+			if (! implementsZwaveClass(it.toInteger())) 
+				{
+				cmds << secure(zwave.versionV3.versionCommandClassGet(requestedCommandClass:it.toInteger()))
+				} else {
+				log.debug "Already have command class information for class: ${it.toInteger()}."
+				}
+		}
+		if (cmds) 
+		{
+			log.debug "TimeUnit.SECONDS is: " + TimeUnit.SECONDS
+			getClassVersionReportSemaphors.tryAcquire(Math.min(cmds.size(), 32), 5, TimeUnit.SECONDS)
+			sendToDevice(cmds)
+		}
+		getClassVersionReportSemaphors.tryAcquire(32, 5, TimeUnit.SECONDS)
+		getClassVersionReportSemaphors.release(32)
+}
+
+void zwaveEvent(hubitat.zwave.commands.versionv3.VersionCommandClassReport cmd) 
+{	
+	log.debug "Received a VersionCommandClassReport: ${cmd}."
+
+	ConcurrentHashMap deviceStorage = reportCacheByFirmware.get(firmwareKey(), new ConcurrentHashMap())
+	ConcurrentHashMap commandClassMap = deviceStorage.get("8614", new ConcurrentHashMap<Short, Short>())
+	if (commandClassMap.containsKey(cmd.requestedCommandClass)) {
+			commandClassMap.replace(cmd.requestedCommandClass, cmd.commandClassVersion)
+		} else { 
+			commandClassMap.put(cmd.requestedCommandClass, cmd.commandClassVersion)		
+		}
+	getClassVersionReportSemaphors.release(1)
+}
+
+Map getCachedVersionCommandClassReport()
+{
+	return reportCacheByFirmware.get(firmwareKey())?.get("8614")
 }
 
 synchronized void getOtherReports(ep = null )
 {
+	getCommandClassVersionReports()
 	// Call this from the firmware Report Handler
 	
 	// MultiChannelEndPointReport Get:0x6007  Report:0x6008
@@ -305,21 +391,18 @@ void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
 		} else {
 			versionReportCache.put( device.getDeviceNetworkId(), cmd) 
 		}
+	versionGetSemaphor.release(1)
 	getOtherReports()
 }
 
 hubitat.zwave.Command  getCachedVersionReport() { return versionReportCache.get( device.getDeviceNetworkId() )}
 
 // //////////////////////////////////////////////////////////////////////
-void zwaveEvent(hubitat.zwave.commands.centralscenev1.CentralSceneSupportedReport  cmd)  			{ cacheReportByFirmwareVersion (cmd) }
-void zwaveEvent(hubitat.zwave.commands.centralscenev2.CentralSceneSupportedReport  cmd)  			{ cacheReportByFirmwareVersion (cmd) }
 void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneSupportedReport  cmd)  			{ cacheReportByFirmwareVersion (cmd) }
-void zwaveEvent(hubitat.zwave.commands.meterv2.MeterSupportedReport cmd, ep = null ) 				{ cacheReportByFirmwareVersion (cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.meterv3.MeterSupportedReport cmd, ep = null ) 				{ cacheReportByFirmwareVersion (cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.meterv4.MeterSupportedReport cmd, ep = null ) 				{ cacheReportByFirmwareVersion (cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.meterv5.MeterSupportedReport cmd, ep = null ) 				{ cacheReportByFirmwareVersion (cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.protectionv2.ProtectionSupportedReport  cmd, ep = null )   	{ cacheReportByFirmwareVersion (cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelSupportedReport  cmd, ep = null )   	{ cacheReportByFirmwareVersion (cmd, ep) }
+
 void zwaveEvent(hubitat.zwave.commands.sensormultilevelv11.SensorMultilevelSupportedSensorReport  cmd, ep = null ) 				
 { 
 	log.warn "SensorMultilevelSupportedSensorReport caching requires additional code to handle sub-reports!"
@@ -427,7 +510,7 @@ void cacheReportByFirmwareAndIndex(hubitat.zwave.Command cmd, Short index = null
 	ConcurrentHashMap deviceStorage = reportCacheByFirmware.get(firmwareKey(), new ConcurrentHashMap())
 	ConcurrentHashMap indexedMap = deviceStorage.get(cmd.CMD, new ConcurrentHashMap())
 	log.debug "IndexedMap for device ${device.displayName} is: " + indexedMap
-	indexedMap.put(index, cmd)
+	indexedMap.put( (index ?: 0 ), cmd)
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -480,8 +563,8 @@ log.debug "Results of supervised message is a report: ${cmd}."
 
 //// Catch Event Not Otherwise Handled! /////
 
-void zwaveEvent(hubitat.zwave.Command cmd) {
-    if (logEnable) log.debug "For ${device.displayName}, Received Z-Wave Message that is not handled by this driver: ${cmd.class}, ${cmd}."
+void zwaveEvent(hubitat.zwave.Command cmd, ep = null) {
+    log.debug "For ${device.displayName}, Received Z-Wave Message ${cmd} that is not handled by this driver. Endpoint: ${ep}."
 }
 
 ////    Security Encapsulation   ////
