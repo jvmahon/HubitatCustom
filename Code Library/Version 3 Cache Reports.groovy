@@ -559,8 +559,8 @@ void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCapabilityRepo
 	cacheReport(cmd, cmd.endPoint)
 	log.debug "Cached MultiChannelCapabilityReport is: " + getCachedMultiChannelCapabilityReport(cmd.endPoint)
 }
-hubitat.zwave.Command  getCachedMultiChannelCapabilityReport(Short ep) { return (getCachedReport("600A", ep))}
 
+hubitat.zwave.Command  getCachedMultiChannelCapabilityReport(Short ep) { return (getCachedReport("600A", ep))}
 
 
 //////////////////////////////////////////////////////////////////////
@@ -657,9 +657,7 @@ String secure(hubitat.zwave.Command cmd, ep = null ){
 }
 
 ////    Multi-Channel Encapsulation   ////
-void zwaveEvent(hubitat.zwave.commands.multichannelv3.MultiChannelCmdEncap cmd) { processMultichannelEncapsulatedCommand( cmd) }
-void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCmdEncap cmd) { processMultichannelEncapsulatedCommand( cmd) }
-void processMultichannelEncapsulatedCommand( cmd)
+void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCmdEncap cmd)
 {
     hubitat.zwave.Command  encapsulatedCommand = cmd.encapsulatedCommand(defaultParseMap)
 
@@ -784,11 +782,33 @@ void batteryGet() {
 
 Boolean isDigitalEvent() { return getDeviceMapByNetworkID().get("EventTypeIsDigital") as Boolean }
 void setIsDigitalEvent(Boolean value) { 
-	log.warn "setIsDigitalEvent is currently a stub function!"
+	log.warn "setIsDigitalEvent is currently a stub function returning false!"
 	// getDeviceMapByNetworkID().put("EventTypeIsDigital", value as Boolean)
 }
 
-void zwaveEvent(hubitat.zwave.commands.switchbinaryv2.SwitchBinaryReport cmd, ep = null)  			{ processDeviceReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.switchbinaryv2.SwitchBinaryReport cmd, ep = null)
+{
+	def targetDevice
+	if (ep) {
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
+	} else { targetDevice = device }	
+
+	if (! targetDevice.hasAttribute("switch")) log.warn "For device ${targetDevice.displayName}, received a Switch Binary Report for a device that does not have a switch!"
+	
+	String priorSwitchState = targetDevice.currentValue("switch")
+	String newSwitchState = ((cmd.value > 0) ? "on" : "off")
+	
+    if (priorSwitchState != newSwitchState) // Only send the state report if there is a change in switch state!
+	{
+		targetDevice.sendEvent(	name: "switch", value: newSwitchState, 
+						descriptionText: "Device ${targetDevice.displayName} set to ${newSwitchState}.", 
+						type: isDigitalEvent() ? "digital" : "physical" )
+		if (txtEnable) log.info "Device ${targetDevice.displayName} set to ${newSwitchState}."
+	}
+	setIsDigitalEvent( false )
+}
+
+
 void zwaveEvent(hubitat.zwave.commands.basicv2.BasicReport cmd, ep = null) 							{ processDeviceReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
 void processDeviceReport(cmd,  ep)
@@ -798,16 +818,15 @@ void processDeviceReport(cmd,  ep)
 		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
 	} else { targetDevice = device }	
 
-	Boolean hasSwitch = targetDevice.hasAttribute("switch") || targetDevice.hasCapability("Switch") || targetDevice.hasCapability("Bulb")  \
-					|| targetDevice.hasCapability("Light") || targetDevice.hasCapability("Outlet")  || targetDevice.hasCapability("RelaySwitch")
-	Boolean hasDimmer = targetDevice.hasAttribute("level")  || targetDevice.hasCapability("SwitchLevel")
+	Boolean hasSwitch = targetDevice.hasAttribute("switch")
+	Boolean hasDimmer = targetDevice.hasAttribute("level")  || targetDevice.hasAttribute("position")
 	Boolean turnedOn = false
 	Integer newLevel = 0
 
-	if (cmd.hasProperty("duration")) //  Consider duration and target, but only when process a BasicReport Version 2 or Multilevel v4
+	if ((! (cmd.duration.is( null ) || cmd.targetValue.is( null ) )) && ((cmd.duration as Integer) > (0 as Integer))) //  Consider duration and target, but only when both are present and in transition with duration > 0 
 	{
-		turnedOn = ((cmd.duration as Integer == 0 ) && ( cmd.value as Integer != 0 )) || ((cmd.duration as Integer != 0 ) && (cmd.targetValue as Integer != 0 ))
-		newLevel = ((cmd.duration as Integer == 0 ) ? cmd.value : cmd.targetValue ) as Integer
+		turnedOn = (cmd.targetValue as Integer) != (0 as Integer)
+		newLevel = (cmd.targetValue as Integer)
 	} else {
 		turnedOn = (cmd.value as Integer) > (0 as Integer)
 		newLevel = cmd.value as Integer
@@ -816,11 +835,13 @@ void processDeviceReport(cmd,  ep)
 	String priorSwitchState = targetDevice.currentValue("switch")
 	String newSwitchState = (turnedOn ? "on" : "off")
 	Integer priorLevel = targetDevice.currentValue("level")
-	Integer targetLevel = ((newLevel == 99) ? 100 : newLevel)
-	
-	if ((priorLevel == 99) && (newLevel == 99)) { targetLevel = 99 }
-		else if ((priorLevel == 100) && (newLevel == 99)) { targetLevel = 100 }
-			else targetLevel = newLevel
+	Integer targetLevel
+
+	if (newLevel == 99)
+	{
+		if ( priorLevel == 100) targetLevel = 100
+		if ( priorLevel == 99) targetLevel = 99
+	} else targetLevel = newLevel
 	
     if (hasSwitch && (priorSwitchState != newSwitchState))
 	{
