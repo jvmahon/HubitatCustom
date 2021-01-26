@@ -567,31 +567,32 @@ hubitat.zwave.Command  getCachedMultiChannelCapabilityReport(Short ep) { return 
 //////        Handle Supervision request and reports           ///////
 ////////////////////////////////////////////////////////////////////// 
 @Field static ConcurrentHashMap<String, Short> supervisionSessionIDs = new ConcurrentHashMap<String, Short>()
-
-Short getSessionID()
-{
-    Short nextSessionID = supervisionSessionIDs.get(device.getDeviceNetworkId() as String,(Math.random() * 32) % 32 )
-	nextSessionID = (nextSessionID + 1) % 32
-    supervisionSessionIDs.replace(device.getDeviceNetworkId(), nextSessionID)
-	log.debug nextSessionID
-    return nextSessionID   
-}
+@Field static ConcurrentHashMap<String, Short> supervisionSentCommands = new ConcurrentHashMap<String, ConcurrentHashMap<Short, hubitat.zwave.Command>>()
 
 hubitat.zwave.Command supervise(hubitat.zwave.Command command)
 {
-    log.debug "Supervising a command: ${command}"
     if (implementsZwaveClass(0x6C))
-        {
-            return zwave.supervisionV1.supervisionGet(sessionID: getSessionID(), statusUpdates: true).encapsulate(command)
-        } else {
-            return command
-        }
+	{
+		// Get the next session ID, but if there is no stored session ID, initialize it with a random value.
+		Short nextSessionID = supervisionSessionIDs.get(device.getDeviceNetworkId() as String,((Math.random() * 32) % 32) as Short )
+		nextSessionID = (nextSessionID + 1) % 32 // increment and then mod with 32
+		supervisionSessionIDs.replace(device.getDeviceNetworkId(), nextSessionID)
+		
+		// Store the command that is being sent so that you can log.debug it out in case of failure!
+		supervisionSentCommands.get(device.getDeviceNetworkId() as String, new ConcurrentHashMap<Short, hubitat.zwave.Command>()).put(nextSessionID, command)
+
+		if (logEnable) log.debug "Supervising a command: ${command} with session ID: ${nextSessionID}."
+		return zwave.supervisionV1.supervisionGet(sessionID: nextSessionID, statusUpdates: true).encapsulate(command)
+	} else {
+		if (logEnable) log.debug "Not Supervising the command ${command}"
+		return command
+	}
 }
 
 // This handles a supervised message (a "get") received from the Z-Wave device //
 void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd, Short ep = null ) {
-	if (ep) log.warn "Received an endpoint in a SupervisionGet command. Probably works fine, but confirm handling!"
-    if (logEnable) log.debug "Device ${device.displayName}: Supervision get: ${cmd}"
+	if (ep) log.warn "Received an endpoint in a SupervisionGet command ${cmd}. Probably works fine, but confirm handling!"
+    if (logEnable) log.debug "Received a SupervisionGet message from ${device.displayName}. The SupervisionGet message is: ${cmd}"
 
     hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap, defaultParseMap)
 	
@@ -602,7 +603,14 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd, Short e
 }
 
 void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionReport cmd) {
-log.debug "Results of supervised message is a report: ${cmd}."
+
+	hubitat.zwave.Command whatWasSent = supervisionSentCommands?.get(device.getDeviceNetworkId() as String)?.get(cmd.sessionID)
+
+	if ((cmd.status as Integer) == (0x02 as Integer)) {
+		log.warn "A Supervised command sent to device ${device.displayName} failed. The command that failed was: ${whatWasSent}."
+	} else if (logEnable){
+		log.debug "Results of supervised message is a report: ${cmd}, which was received in response to original command: " + whatWasSent
+	}
 }
 
 
