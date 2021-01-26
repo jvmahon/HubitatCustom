@@ -521,7 +521,7 @@ void updated()
 	settingValueMap.each {k, v ->
 		if (v.is(null)) {
 		log.debug "Setting for parameter ${k} is null, so getting its value!"
-			cmds << secure(zwave.configurationV1.configurationGet(parameterNumber: k))
+			cmds << secure(supervise(zwave.configurationV1.configurationGet(parameterNumber: k)))
 		}
 	}
 	if (cmds) sendToDevice(cmds)
@@ -552,7 +552,7 @@ void processPendingChanges()
 		Short PSize = parameterSizeMap?.get(k as Integer)
 		if (logEnable) log.debug "Device ${device.displayName}: Parameters for setParameter are: parameterNumber: ${k as Short}, size: ${PSize}, value: ${v}."
 		// setParameter((k as Short), (PSize as Short), (v as BigInteger) ) 
-		cmds << secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: (v as BigInteger), parameterNumber: (k as Short), size: (PSize as Short)))
+		cmds << secure(supervise(zwave.configurationV1.configurationSet(scaledConfigurationValue: (v as BigInteger), parameterNumber: (k as Short), size: (PSize as Short))))
 	    cmds << secure(zwave.configurationV1.configurationGet(parameterNumber: (k as Short)))
 	}
 	if (cmds) sendToDevice(cmds)
@@ -584,7 +584,7 @@ void setParameter(Short parameterNumber = null, Short size = null, BigInteger va
 		log.warn "Device ${device.displayName}: Can't set parameter ${parameterNumber}, Incomplete parameter list supplied... syntax: setParameter(parameterNumber,size,value), received: setParameter(${parameterNumber}, ${size}, ${value})."
     } else {
 		List<hubitat.zwave.Command> cmds = []
-	    cmds << secure(zwave.configurationV1.configurationSet(scaledConfigurationValue: value, parameterNumber: parameterNumber, size: size))
+	    cmds << secure(supervise(zwave.configurationV1.configurationSet(scaledConfigurationValue: value, parameterNumber: parameterNumber, size: size)))
 	    cmds << secure(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber))
 		sendToDevice(cmds)
     }
@@ -625,42 +625,38 @@ void processConfigurationReport(cmd) {
 //////                  Handle Supervision request            ///////
 ////////////////////////////////////////////////////////////////////// 
 @Field static ConcurrentHashMap<String, Short> supervisionSessionIDs = new ConcurrentHashMap<String, Short>()
+@Field static ConcurrentHashMap<String, Short> supervisionSentCommands = new ConcurrentHashMap<String, ConcurrentHashMap<Short, hubitat.zwave.Command>>()
 
 Boolean implementsZwaveClass(zwaveCommandClass)
 {
-	List<Integer> 	deviceClasses = getDataValue("inClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Integer }
-					deviceClasses += getDataValue("secureInClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Integer }
-					
-	if (!deviceClasses.contains(zwaveCommandClass as Integer)) return true
-	
-	return false
-}
-
-
-Short getSessionID()
-{
-    Short nextSessionID = supervisionSessionIDs.get(device.getDeviceNetworkId() as String,(Math.random() * 32) % 32 )
-	nextSessionID = (nextSessionID + 1) % 32
-    supervisionSessionIDs.replace(device.getDeviceNetworkId(), nextSessionID)
-	log.debug nextSessionID
-    return nextSessionID   
+	List<Short> 	deviceClasses = getDataValue("inClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Short }
+					deviceClasses += getDataValue("secureInClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Short }
+	return (deviceClasses.contains(zwaveCommandClass as Short))
 }
 
 hubitat.zwave.Command supervise(hubitat.zwave.Command command)
 {
-
     if (implementsZwaveClass(0x6C))
-        {
-			log.debug "Supervising a command: ${command}"
-            return zwave.supervisionV1.supervisionGet(sessionID: getSessionID(), statusUpdates: true).encapsulate(command)
-        } else {
-            return command
-        }
+	{
+		// Get the next session ID, but if there is no stored session ID, initialize it with a random value.
+		Short nextSessionID = supervisionSessionIDs.get(device.getDeviceNetworkId() as String,((Math.random() * 32) % 32) as Short )
+		nextSessionID = (nextSessionID + 1) % 32 // increment and then mod with 32
+		supervisionSessionIDs.replace(device.getDeviceNetworkId(), nextSessionID)
+		
+		// Store the command that is being sent so that you can log.debug it out in case of failure!
+		supervisionSentCommands.get(device.getDeviceNetworkId() as String, new ConcurrentHashMap<Short, hubitat.zwave.Command>()).put(nextSessionID, command)
+
+		if (logEnable) log.debug "Supervising a command: ${command} with session ID: ${nextSessionID}."
+		return zwave.supervisionV1.supervisionGet(sessionID: nextSessionID, statusUpdates: true).encapsulate(command)
+	} else {
+		if (logEnable) log.debug "Not Supervising the command ${command}"
+		return command
+	}
 }
 
 // This handles a supervised message (a "get") received from the Z-Wave device //
 void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
-    if (logEnable) log.debug "Device ${device.displayName}: Supervision get: ${cmd}"
+    if (logEnable) log.debug "Received a SupervisionGet message from ${device.displayName}. The SupervisionGet message is: ${cmd}"
 
     hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap, defaultParseMap)
 	
@@ -671,7 +667,14 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
 }
 
 void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionReport cmd) {
-log.debug "Results of supervised message is a report: ${cmd}."
+
+	hubitat.zwave.Command whatWasSent = supervisionSentCommands?.get(device.getDeviceNetworkId() as String)?.get(cmd.sessionID)
+	
+	if (cmd.status == 0x02) {
+		log.warn "A Supervised command sent to device ${device.displayName} failed. The command that failed was: ${whatWasSent}."
+	} else if (logEnable){
+		log.debug "Results of supervised message is a report: ${cmd}, which was received in response to original command: " + whatWasSent
+	}
 }
 
 
@@ -764,9 +767,7 @@ void processMultichannelEncapsulatedCommand( cmd)
 }
 
 void parse(String description) {
-	if (logEnable) log.debug "Parsing description string: ${description}"
-		hubitat.zwave.Command cmd = zwave.parse(description, defaultParseMap)
-
+	hubitat.zwave.Command cmd = zwave.parse(description, defaultParseMap)
     if (cmd) { zwaveEvent(cmd) }
 }
 
@@ -1139,6 +1140,8 @@ Map getSupportedMeters()
 
 	return meterInfo
 }
+
+// Maybe add supervision?
 void meterReset() {
     if (txtEnable) log.info "Device ${device.displayName}: Resetting energy statistics"
 	sendToDevice(secure(zwave.meterV2.meterReset()))
@@ -1893,7 +1896,7 @@ void lockrefresh()
 void lock()
 {
 	List<hubitat.zwave.Command> cmds=[]
-	cmds << secure( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0xFF) )
+	cmds << secure( supervise(zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0xFF) ))
 	cmds << "delay 4500"
 	cmds << secure( zwave.doorLockV1.doorLockOperationGet() )
 	sendToDevice(cmds)
@@ -1902,7 +1905,7 @@ void lock()
 void unlock()
 {
 	List<hubitat.zwave.Command> cmds=[]
-	cmds << secure( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0x00) )
+	cmds << secure( supervise(zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0x00) ))
 	cmds << "delay 4500"
 	cmds << secure( zwave.doorLockV1.doorLockOperationGet() )
 	sendToDevice(cmds)
