@@ -265,7 +265,7 @@ synchronized void getSupportedReports(Short ep = null )
 	//  Get the Version Report then everything else is retrieved from the Version Report handler by calling getOtherReports()
 	versionGetSemaphor.tryAcquire(1, 10, TimeUnit.SECONDS)
 
-		getThenCacheDeviceReport( zwave.versionV3.versionGet().CMD )
+	getThenCacheDeviceReport( zwave.versionV3.versionGet().CMD )
 	
 	Boolean success = versionGetSemaphor.tryAcquire(1, 10, TimeUnit.SECONDS)
 	log.debug "Acquired firmware version success = ${success}."
@@ -524,6 +524,7 @@ hubitat.zwave.Command  getCachedEventSupportedReport(Short notificationType){
 	
 
 ////////////  Code to Cache and Retrieve MultiChannel Reports - requires Special Handling!  /////////////
+@Field static Semaphore multiChannelGetSemaphors = new Semaphore(32)
 
 void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelEndPointReport  cmd)  			
 { 
@@ -533,6 +534,10 @@ void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelEndPointReport
 	List<hubitat.zwave.Command> cmds = []
 	 
 	log.warn "Add code to MultiChannelEndPointReport processing so it doesn't re-get the endpoint multiChannelCapabilityGet if endpoint report is already stored!"
+	
+	Integer neededReports = 0
+	log.debug "Getting Semaphors in function multiChannelGetSemaphors. Number available: ${multiChannelGetSemaphors.availablePermits()}."
+	Boolean gotLock = multiChannelGetSemaphors.tryAcquire(32, 10, TimeUnit.SECONDS)
 	
 	for( Short ep = 1; ep <= cmd.endPoints; ep++)
 	{
@@ -544,10 +549,27 @@ void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelEndPointReport
 				continue 
 			}
 		// log.debug "Iterating through MultiChannelEndPointReport for endpoint: ${ep}."
+		
+		neededReports += 1
 		cmds << secure(zwave.multiChannelV4.multiChannelCapabilityGet(endPoint: ep))
 		cmds << "delay 500"
 	}
-	if (cmds) sendToDevice(cmds)
+	multiChannelGetSemaphors.release(32 - neededReports)
+
+	if (cmds)
+	{ 	
+		sendToDevice(cmds)
+		log.debug "Waiting to ReAcquire Semaphors in function multiChannelGetSemaphors. Number available: ${multiChannelGetSemaphors.availablePermits()}."
+		Boolean success = multiChannelGetSemaphors.tryAcquire(32, 10, TimeUnit.SECONDS)
+		if (!success) 
+		{
+			log.warn "Failed to ReAcquire All Semaphors in function multiChannelGetSemaphors. Number available: ${multiChannelGetSemaphors.availablePermits()}."
+			if (gotLock) multiChannelGetSemaphors.release(neededReports)
+
+		}
+			log.debug "Released all semaphors!"
+		}
+	}
 }
 
 hubitat.zwave.Command  getCachedMultiChannelEndPointReport()			{ return (getCachedReport("6008"))}
@@ -557,6 +579,8 @@ void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCapabilityRepo
 { 
 	log.debug "Received a MultiChannelCapabilityReport: ${cmd}."
 	cacheReport(cmd, cmd.endPoint)
+	multiChannelGetSemaphors.release(1)
+
 	log.debug "Cached MultiChannelCapabilityReport is: " + getCachedMultiChannelCapabilityReport(cmd.endPoint)
 }
 
