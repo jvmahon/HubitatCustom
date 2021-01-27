@@ -77,7 +77,7 @@ metadata {
 		
  		// For switches and dimmers!
 			capability "Switch"	
-		 //   capability "SwitchLevel"
+		   // capability "SwitchLevel"
 			
 		// Does anybody really use the "Change Level" controls? If so, uncomment it!
 		//	capability "ChangeLevel"
@@ -627,8 +627,9 @@ void processConfigurationReport(cmd) {
 @Field static ConcurrentHashMap<String, Short> supervisionSessionIDs = new ConcurrentHashMap<String, Short>()
 @Field static ConcurrentHashMap<String, Short> supervisionSentCommands = new ConcurrentHashMap<String, ConcurrentHashMap<Short, hubitat.zwave.Command>>()
 
-Boolean implementsZwaveClass(zwaveCommandClass)
+Boolean implementsZwaveClass(zwaveCommandClass, Short ep = null )
 {
+	if (ep ) log.warn "Classes not fully implemented for endpoints!"
 	List<Short> 	deviceClasses = getDataValue("inClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Short }
 					deviceClasses += getDataValue("secureInClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Short }
 	return (deviceClasses.contains(zwaveCommandClass as Short))
@@ -1367,8 +1368,31 @@ void setSpeed(speed, cd = null )
 Boolean isDigitalEvent() { return getDeviceMapByNetworkID().get("EventTypeIsDigital") as Boolean }
 void setIsDigitalEvent(Boolean value) { getDeviceMapByNetworkID().put("EventTypeIsDigital", value as Boolean)}
 
-void zwaveEvent(hubitat.zwave.commands.switchbinaryv1.SwitchBinaryReport cmd, ep = null) 			{ processDeviceReport(cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.switchbinaryv2.SwitchBinaryReport cmd, ep = null)  			{ processDeviceReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.switchbinaryv1.SwitchBinaryReport cmd, ep = null) 			{ processBinaryReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.switchbinaryv2.SwitchBinaryReport cmd, ep = null)  			{ processBinaryReport(cmd, ep) }
+void processBinaryReport( cmd, ep = null)
+{
+	def targetDevice
+	if (ep) {
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
+	} else { targetDevice = device }	
+
+	if (! targetDevice.hasAttribute("switch")) log.warn "For device ${targetDevice.displayName}, received a Switch Binary Report for a device that does not have a switch!"
+	
+	String priorSwitchState = targetDevice.currentValue("switch")
+	String newSwitchState = ((cmd.value > 0) ? "on" : "off")
+	
+    if (priorSwitchState != newSwitchState) // Only send the state report if there is a change in switch state!
+	{
+		targetDevice.sendEvent(	name: "switch", value: newSwitchState, 
+						descriptionText: "Device ${targetDevice.displayName} set to ${newSwitchState}.", 
+						type: isDigitalEvent() ? "digital" : "physical" )
+		if (txtEnable) log.info "Device ${targetDevice.displayName} set to ${newSwitchState}."
+	}
+	setIsDigitalEvent( false )
+}
+
+
 void zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd, ep = null) 							{ processDeviceReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.basicv2.BasicReport cmd, ep = null) 							{ processDeviceReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv1.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
@@ -1382,16 +1406,15 @@ void processDeviceReport(cmd,  ep)
 		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
 	} else { targetDevice = device }	
 
-	Boolean hasSwitch = targetDevice.hasAttribute("switch") || targetDevice.hasCapability("Switch") || targetDevice.hasCapability("Bulb")  \
-					|| targetDevice.hasCapability("Light") || targetDevice.hasCapability("Outlet")  || targetDevice.hasCapability("RelaySwitch")
-	Boolean hasDimmer = targetDevice.hasAttribute("level")  || targetDevice.hasCapability("SwitchLevel")
+	Boolean hasSwitch = targetDevice.hasAttribute("switch")
+	Boolean hasDimmer = targetDevice.hasAttribute("level")  || targetDevice.hasAttribute("position")
 	Boolean turnedOn = false
 	Integer newLevel = 0
 
-	if (cmd.hasProperty("duration")) //  Consider duration and target, but only when process a BasicReport Version 2 or Multilevel v4
+	if ((! (cmd.duration.is( null ) || cmd.targetValue.is( null ) )) && ((cmd.duration as Integer) > (0 as Integer))) //  Consider duration and target, but only when both are present and in transition with duration > 0 
 	{
-		turnedOn = ((cmd.duration as Integer == 0 ) && ( cmd.value as Integer != 0 )) || ((cmd.duration as Integer != 0 ) && (cmd.targetValue as Integer != 0 ))
-		newLevel = ((cmd.duration as Integer == 0 ) ? cmd.value : cmd.targetValue ) as Integer
+		turnedOn = (cmd.targetValue as Integer) != (0 as Integer)
+		newLevel = (cmd.targetValue as Integer)
 	} else {
 		turnedOn = (cmd.value as Integer) > (0 as Integer)
 		newLevel = cmd.value as Integer
@@ -1400,11 +1423,13 @@ void processDeviceReport(cmd,  ep)
 	String priorSwitchState = targetDevice.currentValue("switch")
 	String newSwitchState = (turnedOn ? "on" : "off")
 	Integer priorLevel = targetDevice.currentValue("level")
-	Integer targetLevel = ((newLevel == 99) ? 100 : newLevel)
-	
-	if ((priorLevel == 99) && (newLevel == 99)) { targetLevel = 99 }
-		else if ((priorLevel == 100) && (newLevel == 99)) { targetLevel = 100 }
-			else targetLevel = newLevel
+	Integer targetLevel
+
+	if (newLevel == 99)
+	{
+		if ( priorLevel == 100) targetLevel = 100
+		if ( priorLevel == 99) targetLevel = 99
+	} else targetLevel = newLevel
 	
     if (hasSwitch && (priorSwitchState != newSwitchState))
 	{
@@ -1422,42 +1447,68 @@ void processDeviceReport(cmd,  ep)
 					descriptionText: "Device ${targetDevice.displayName} level set to ${targetLevel}%", 
 					type: isDigitalEvent() ? "digital" : "physical" )
 			if (txtEnable) log.info "Device ${targetDevice.displayName} level set to ${targetLevel}%"		
+		} else {
+			if (logEnable) log.debug "Device ${targetDevice.displayName} level unchanged. "		
 		}
 	}
 
-	if (!hasSwitch && !hasDimmer) log.warn "For device ${targetDevice.displayName} receive a BasicReport which wasn't processed. Need to check BasicReport handling code." + cmd
+	if (!hasSwitch && !hasDimmer) log.warn "For device ${targetDevice.displayName} receive a report which wasn't processed. Need to check report handling code." + cmd
 	setIsDigitalEvent( false )
 }
 
 void on(cd = null ) {
+log.debug "called the On function with child device ${cd?.displayName}"
 	def targetDevice = (cd ? cd : device)
-	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
 
-	if (targetDevice.hasCapability("SwitchLevel")) {
+	if (implementsZwaveClass(0x26, ep)) // Multilevel  type device
+	{ 
 		Integer level = (targetDevice.currentValue("level") as Integer) ?: 100
+        level = ((level < 1) || (level > 100)) ? 100 : level // If level got set to less than 1 somehow,then turn it on to 100%
 		if (txtEnable) log.info "Device ${targetDevice.displayName}: Turned On at Level: ${level}."
 
-		sendToDevice(secure(supervise(zwave.basicV1.basicSet(value: ((level > 99) ? 99 : level))), ep)	)	
+		sendToDevice(secure(supervise(zwave.switchMultilevelV4.switchMultilevelSet(value: ((level > 99) ? 99 : level))), ep)	)	
 		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
 		targetDevice.sendEvent(name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} set to level ${level}%", type: "digital")
 
-	} else {
+	} 
+	else if (implementsZwaveClass(0x25, ep)) // Switch Binary Type device
+	{
+		if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning to: On."
+		sendToDevice(secure(supervise(zwave.switchBinaryV1.switchBinarySet(switchValue: 255 )), ep))
+		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
+	}
+	else if (implementsZwaveClass(0x20, ep)) // Basic Set Type device
+	{
+		log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
 		if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning to: On."
 		sendToDevice(secure(supervise(zwave.basicV1.basicSet(value: 255 )), ep))
 		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
+	} else 
+	{
+		log.debug "Error in function on() - device ${targetDevice.displayName} does not implement a supported class"
 	}
 }
 
 void off(cd = null ) {
 	def targetDevice = (cd ? cd : device)
-	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
-
+	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
 	if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning device to: Off."
-	
-	sendToDevice (secure(supervise(zwave.basicV1.basicSet(value: 0 )), ep))
 
+	if (implementsZwaveClass(0x26, ep)) { // Multilevel  type device
+		sendToDevice(secure(supervise(zwave.switchMultilevelV4.switchMultilevelSet(value: 0)), ep)	)	
+	} else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
+		sendToDevice(secure(supervise(zwave.switchBinaryV1.switchBinarySet(switchValue: 0 )), ep))
+	} else if (implementsZwaveClass(0x20, ep)) { // Basic Set Type device
+		log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
+		sendToDevice(secure(supervise(zwave.basicV1.basicSet(value: 0 )), ep))
+	} else {
+		log.debug "Error in function off() - device ${targetDevice.displayName} does not implement a supported class"
+		return
+	}
 	targetDevice.sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} turned off", type: "digital")			
 }
+
 
 
 void setLevel(level) 									{ setLevelForDevice(level, 0, 			null ) } 
