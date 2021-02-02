@@ -1467,7 +1467,7 @@ log.debug "called the On function with child device ${cd?.displayName}"
         level = ((level < 1) || (level > 100)) ? 100 : level // If level got set to less than 1 somehow,then turn it on to 100%
 		if (txtEnable) log.info "Device ${targetDevice.displayName}: Turned On at Level: ${level}."
 
-		sendToDevice(secure(supervise(zwave.switchMultilevelV4.switchMultilevelSet(value: ((level > 99) ? 99 : level))), ep)	)	
+		sendToDevice(secure((zwave.switchMultilevelV4.switchMultilevelSet(value: ((level > 99) ? 99 : level), dimmingDuration:0)), ep)	)	
 		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
 		targetDevice.sendEvent(name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} set to level ${level}%", type: "digital")
 
@@ -1475,14 +1475,14 @@ log.debug "called the On function with child device ${cd?.displayName}"
 	else if (implementsZwaveClass(0x25, ep)) // Switch Binary Type device
 	{
 		if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning to: On."
-		sendToDevice(secure(supervise(zwave.switchBinaryV1.switchBinarySet(switchValue: 255 )), ep))
+		sendToDevice(secure((zwave.switchBinaryV1.switchBinarySet(switchValue: 255 )), ep))
 		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
 	}
 	else if (implementsZwaveClass(0x20, ep)) // Basic Set Type device
 	{
 		log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
 		if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning to: On."
-		sendToDevice(secure(supervise(zwave.basicV1.basicSet(value: 255 )), ep))
+		sendToDevice(secure((zwave.basicV1.basicSet(value: 255 )), ep))
 		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
 	} else 
 	{
@@ -1496,12 +1496,12 @@ void off(cd = null ) {
 	if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning device to: Off."
 
 	if (implementsZwaveClass(0x26, ep)) { // Multilevel  type device
-		sendToDevice(secure(supervise(zwave.switchMultilevelV4.switchMultilevelSet(value: 0)), ep)	)	
+		sendToDevice(secure((zwave.switchMultilevelV4.switchMultilevelSet(value: 0, dimmingDuration:0)), ep)	)	
 	} else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
-		sendToDevice(secure(supervise(zwave.switchBinaryV1.switchBinarySet(switchValue: 0 )), ep))
+		sendToDevice(secure((zwave.switchBinaryV1.switchBinarySet(switchValue: 0 )), ep))
 	} else if (implementsZwaveClass(0x20, ep)) { // Basic Set Type device
 		log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
-		sendToDevice(secure(supervise(zwave.basicV1.basicSet(value: 0 )), ep))
+		sendToDevice(secure((zwave.basicV1.basicSet(value: 0 )), ep))
 	} else {
 		log.debug "Error in function off() - device ${targetDevice.displayName} does not implement a supported class"
 		return
@@ -1512,7 +1512,7 @@ void off(cd = null ) {
 
 
 void setLevel(level) 									{ setLevelForDevice(level, 0, 			null ) } 
-void setLevel(level, duration) 							{ setLevelForDevice(level, duration, 	null ) } 
+void setLevel(level, duration) 							{ setLevelForDevice(level, duration = 0, 	null ) } 
 void setLevelForDevice(level, duration, cd)
 {
 	def targetDevice = (cd ? cd : device)
@@ -1535,10 +1535,10 @@ void setLevelForDevice(level, duration, cd)
 		
 		if (getZwaveClassVersionMap().get(38 as Integer) < 2)
 		{
-			sendToDevice(secure(supervise(zwave.switchMultilevelV1.switchMultilevelSet(value: 0)), ep))
+			sendToDevice(secure((zwave.switchMultilevelV1.switchMultilevelSet(value: 0)), ep))
 			log.warn "${targetDevice.displayName} does not support dimming duration setting command. Defaulting to dimming duration set by device parameters."
 		} else {
-			sendToDevice(secure(supervise(zwave.switchMultilevelV2.switchMultilevelSet(value: 0, dimmingDuration: duration)), ep))
+			sendToDevice(secure((zwave.switchMultilevelV2.switchMultilevelSet(value: 0, dimmingDuration: duration ?: 0)), ep))
 		}
 		targetDevice.sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} remains at off", type: "digital")
 		// Return after sending the switch off
@@ -1548,14 +1548,14 @@ void setLevelForDevice(level, duration, cd)
 	if (targetDevice.hasCapability("SwitchLevel")) {		// Device is a dimmer!
 		if (getZwaveClassVersionMap().get(38 as Integer) < 2)
 		{
-			sendToDevice(secure(supervise(zwave.switchMultilevelV1.switchMultilevelSet(value: ((level > 99) ? 99 : level) )  ), ep))
+			sendToDevice(secure((zwave.switchMultilevelV1.switchMultilevelSet(value: ((level > 99) ? 99 : level) )  ), ep))
 			if (logEnable) log.warn "${targetDevice.displayName} does not support dimming duration setting command. Defaulting to dimming duration set by device parameters."
 		} else {
-			sendToDevice(secure(supervise(zwave.switchMultilevelV2.switchMultilevelSet(value: ((level > 99) ? 99 : level), dimmingDuration: duration)), ep))
+			sendToDevice(secure((zwave.switchMultilevelV2.switchMultilevelSet(value: ((level > 99) ? 99 : level), dimmingDuration: duration)), ep))
 		}
 	} else if (targetDevice.hasCapability("Switch")) {   // Device is a non-dimming switch, but can still send the Z-wave level value
 		// To turn on a non-dimming switch in response to a setlevel command!"
-		sendToDevice(secure(supervise(zwave.basicV1.basicSet(value: ((level > 99) ? 99 : level) ))), ep)
+		sendToDevice(secure((zwave.basicV1.basicSet(value: ((level > 99) ? 99 : level) ))), ep)
 	} else {
 		if (logEnable) log.debug "Received a setLevel command for device ${targetDevice.displayName}, but this is neither a switch or a dimmer device."
 	return
@@ -1574,14 +1574,14 @@ void startLevelChange(direction, cd = null ){
 	def targetDevice = (cd ? cd : device)
 	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
     Integer upDown = (direction == "down" ? 1 : 0)
-    sendToDevice(secure(supervise(zwave.switchMultilevelV1.switchMultilevelStartLevelChange(upDown: upDown, ignoreStartLevel: 1, startLevel: 0)), ep))
+    sendToDevice(secure((zwave.switchMultilevelV1.switchMultilevelStartLevelChange(upDown: upDown, ignoreStartLevel: 1, startLevel: 0)), ep))
 }
 
 void stopLevelChange(cd = null ){
 	def targetDevice = (cd ? cd : device)
 	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
 	List<hubitat.zwave.Command> cmds = []
-		cmds.add(secure(supervise(zwave.switchMultilevelV1.switchMultilevelStopLevelChange()), ep))
+		cmds.add(secure((zwave.switchMultilevelV1.switchMultilevelStopLevelChange()), ep))
 		cmds.add(secure(zwave.basicV1.basicGet(), ep))
 	sendToDevice(cmds)
 }
