@@ -265,7 +265,7 @@ synchronized void getSupportedReports(Short ep = null )
 	//  Get the Version Report then everything else is retrieved from the Version Report handler by calling getOtherReports()
 	versionGetSemaphor.tryAcquire(1, 10, TimeUnit.SECONDS)
 
-		getThenCacheDeviceReport( zwave.versionV3.versionGet().CMD )
+	getThenCacheDeviceReport( zwave.versionV3.versionGet().CMD )
 	
 	Boolean success = versionGetSemaphor.tryAcquire(1, 10, TimeUnit.SECONDS)
 	log.debug "Acquired firmware version success = ${success}."
@@ -524,6 +524,7 @@ hubitat.zwave.Command  getCachedEventSupportedReport(Short notificationType){
 	
 
 ////////////  Code to Cache and Retrieve MultiChannel Reports - requires Special Handling!  /////////////
+@Field static Semaphore multiChannelGetSemaphors = new Semaphore(32)
 
 void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelEndPointReport  cmd)  			
 { 
@@ -533,6 +534,10 @@ void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelEndPointReport
 	List<hubitat.zwave.Command> cmds = []
 	 
 	log.warn "Add code to MultiChannelEndPointReport processing so it doesn't re-get the endpoint multiChannelCapabilityGet if endpoint report is already stored!"
+	
+	Integer neededReports = 0
+	log.debug "Getting Semaphors in function multiChannelGetSemaphors. Number available: ${multiChannelGetSemaphors.availablePermits()}."
+	Boolean gotLock = multiChannelGetSemaphors.tryAcquire(32, 10, TimeUnit.SECONDS)
 	
 	for( Short ep = 1; ep <= cmd.endPoints; ep++)
 	{
@@ -544,10 +549,27 @@ void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelEndPointReport
 				continue 
 			}
 		// log.debug "Iterating through MultiChannelEndPointReport for endpoint: ${ep}."
+		
+		neededReports += 1
 		cmds << secure(zwave.multiChannelV4.multiChannelCapabilityGet(endPoint: ep))
 		cmds << "delay 500"
 	}
-	if (cmds) sendToDevice(cmds)
+	multiChannelGetSemaphors.release(32 - neededReports)
+
+	if (cmds)
+	{ 	
+		sendToDevice(cmds)
+		log.debug "Waiting to ReAcquire Semaphors in function multiChannelGetSemaphors. Number available: ${multiChannelGetSemaphors.availablePermits()}."
+		Boolean success = multiChannelGetSemaphors.tryAcquire(32, 10, TimeUnit.SECONDS)
+		if (!success) 
+		{
+			log.warn "Failed to ReAcquire All Semaphors in function multiChannelGetSemaphors. Number available: ${multiChannelGetSemaphors.availablePermits()}."
+			if (gotLock) multiChannelGetSemaphors.release(neededReports)
+
+		}
+			log.debug "Released all semaphors!"
+		}
+	}
 }
 
 hubitat.zwave.Command  getCachedMultiChannelEndPointReport()			{ return (getCachedReport("6008"))}
@@ -557,41 +579,44 @@ void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCapabilityRepo
 { 
 	log.debug "Received a MultiChannelCapabilityReport: ${cmd}."
 	cacheReport(cmd, cmd.endPoint)
+	multiChannelGetSemaphors.release(1)
+
 	log.debug "Cached MultiChannelCapabilityReport is: " + getCachedMultiChannelCapabilityReport(cmd.endPoint)
 }
-hubitat.zwave.Command  getCachedMultiChannelCapabilityReport(Short ep) { return (getCachedReport("600A", ep))}
 
+hubitat.zwave.Command  getCachedMultiChannelCapabilityReport(Short ep) { return (getCachedReport("600A", ep))}
 
 
 //////////////////////////////////////////////////////////////////////
 //////        Handle Supervision request and reports           ///////
 ////////////////////////////////////////////////////////////////////// 
 @Field static ConcurrentHashMap<String, Short> supervisionSessionIDs = new ConcurrentHashMap<String, Short>()
-
-Short getSessionID()
-{
-    Short nextSessionID = supervisionSessionIDs.get(device.getDeviceNetworkId() as String,(Math.random() * 32) % 32 )
-	nextSessionID = (nextSessionID + 1) % 32
-    supervisionSessionIDs.replace(device.getDeviceNetworkId(), nextSessionID)
-	log.debug nextSessionID
-    return nextSessionID   
-}
+@Field static ConcurrentHashMap<String, Short> supervisionSentCommands = new ConcurrentHashMap<String, ConcurrentHashMap<Short, hubitat.zwave.Command>>()
 
 hubitat.zwave.Command supervise(hubitat.zwave.Command command)
 {
-    log.debug "Supervising a command: ${command}"
     if (implementsZwaveClass(0x6C))
-        {
-            return zwave.supervisionV1.supervisionGet(sessionID: getSessionID(), statusUpdates: true).encapsulate(command)
-        } else {
-            return command
-        }
+	{
+		// Get the next session ID, but if there is no stored session ID, initialize it with a random value.
+		Short nextSessionID = supervisionSessionIDs.get(device.getDeviceNetworkId() as String,((Math.random() * 32) % 32) as Short )
+		nextSessionID = (nextSessionID + 1) % 32 // increment and then mod with 32
+		supervisionSessionIDs.replace(device.getDeviceNetworkId(), nextSessionID)
+		
+		// Store the command that is being sent so that you can log.debug it out in case of failure!
+		supervisionSentCommands.get(device.getDeviceNetworkId() as String, new ConcurrentHashMap<Short, hubitat.zwave.Command>()).put(nextSessionID, command)
+
+		if (logEnable) log.debug "Supervising a command: ${command} with session ID: ${nextSessionID}."
+		return zwave.supervisionV1.supervisionGet(sessionID: nextSessionID, statusUpdates: true).encapsulate(command)
+	} else {
+		if (logEnable) log.debug "Not Supervising the command ${command}"
+		return command
+	}
 }
 
 // This handles a supervised message (a "get") received from the Z-Wave device //
 void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd, Short ep = null ) {
-	if (ep) log.warn "Received an endpoint in a SupervisionGet command. Probably works fine, but confirm handling!"
-    if (logEnable) log.debug "Device ${device.displayName}: Supervision get: ${cmd}"
+	if (ep) log.warn "Received an endpoint in a SupervisionGet command ${cmd}. Probably works fine, but confirm handling!"
+    if (logEnable) log.debug "Received a SupervisionGet message from ${device.displayName}. The SupervisionGet message is: ${cmd}"
 
     hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap, defaultParseMap)
 	
@@ -602,7 +627,14 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd, Short e
 }
 
 void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionReport cmd) {
-log.debug "Results of supervised message is a report: ${cmd}."
+
+	hubitat.zwave.Command whatWasSent = supervisionSentCommands?.get(device.getDeviceNetworkId() as String)?.get(cmd.sessionID)
+
+	if ((cmd.status as Integer) == (0x02 as Integer)) {
+		log.warn "A Supervised command sent to device ${device.displayName} failed. The command that failed was: ${whatWasSent}."
+	} else if (logEnable){
+		log.debug "Results of supervised message is a report: ${cmd}, which was received in response to original command: " + whatWasSent
+	}
 }
 
 
@@ -649,9 +681,7 @@ String secure(hubitat.zwave.Command cmd, ep = null ){
 }
 
 ////    Multi-Channel Encapsulation   ////
-void zwaveEvent(hubitat.zwave.commands.multichannelv3.MultiChannelCmdEncap cmd) { processMultichannelEncapsulatedCommand( cmd) }
-void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCmdEncap cmd) { processMultichannelEncapsulatedCommand( cmd) }
-void processMultichannelEncapsulatedCommand( cmd)
+void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCmdEncap cmd)
 {
     hubitat.zwave.Command  encapsulatedCommand = cmd.encapsulatedCommand(defaultParseMap)
 
@@ -776,11 +806,33 @@ void batteryGet() {
 
 Boolean isDigitalEvent() { return getDeviceMapByNetworkID().get("EventTypeIsDigital") as Boolean }
 void setIsDigitalEvent(Boolean value) { 
-	log.warn "setIsDigitalEvent is currently a stub function!"
+	log.warn "setIsDigitalEvent is currently a stub function returning false!"
 	// getDeviceMapByNetworkID().put("EventTypeIsDigital", value as Boolean)
 }
 
-void zwaveEvent(hubitat.zwave.commands.switchbinaryv2.SwitchBinaryReport cmd, ep = null)  			{ processDeviceReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.switchbinaryv2.SwitchBinaryReport cmd, ep = null)
+{
+	def targetDevice
+	if (ep) {
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
+	} else { targetDevice = device }	
+
+	if (! targetDevice.hasAttribute("switch")) log.warn "For device ${targetDevice.displayName}, received a Switch Binary Report for a device that does not have a switch!"
+	
+	String priorSwitchState = targetDevice.currentValue("switch")
+	String newSwitchState = ((cmd.value > 0) ? "on" : "off")
+	
+    if (priorSwitchState != newSwitchState) // Only send the state report if there is a change in switch state!
+	{
+		targetDevice.sendEvent(	name: "switch", value: newSwitchState, 
+						descriptionText: "Device ${targetDevice.displayName} set to ${newSwitchState}.", 
+						type: isDigitalEvent() ? "digital" : "physical" )
+		if (txtEnable) log.info "Device ${targetDevice.displayName} set to ${newSwitchState}."
+	}
+	setIsDigitalEvent( false )
+}
+
+
 void zwaveEvent(hubitat.zwave.commands.basicv2.BasicReport cmd, ep = null) 							{ processDeviceReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelReport cmd, ep = null)	{ processDeviceReport(cmd, ep) }
 void processDeviceReport(cmd,  ep)
@@ -790,16 +842,15 @@ void processDeviceReport(cmd,  ep)
 		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Integer) == ep}
 	} else { targetDevice = device }	
 
-	Boolean hasSwitch = targetDevice.hasAttribute("switch") || targetDevice.hasCapability("Switch") || targetDevice.hasCapability("Bulb")  \
-					|| targetDevice.hasCapability("Light") || targetDevice.hasCapability("Outlet")  || targetDevice.hasCapability("RelaySwitch")
-	Boolean hasDimmer = targetDevice.hasAttribute("level")  || targetDevice.hasCapability("SwitchLevel")
+	Boolean hasSwitch = targetDevice.hasAttribute("switch")
+	Boolean hasDimmer = targetDevice.hasAttribute("level")  || targetDevice.hasAttribute("position")
 	Boolean turnedOn = false
 	Integer newLevel = 0
 
-	if (cmd.hasProperty("duration")) //  Consider duration and target, but only when process a BasicReport Version 2 or Multilevel v4
+	if ((! (cmd.duration.is( null ) || cmd.targetValue.is( null ) )) && ((cmd.duration as Integer) > (0 as Integer))) //  Consider duration and target, but only when both are present and in transition with duration > 0 
 	{
-		turnedOn = ((cmd.duration as Integer == 0 ) && ( cmd.value as Integer != 0 )) || ((cmd.duration as Integer != 0 ) && (cmd.targetValue as Integer != 0 ))
-		newLevel = ((cmd.duration as Integer == 0 ) ? cmd.value : cmd.targetValue ) as Integer
+		turnedOn = (cmd.targetValue as Integer) != (0 as Integer)
+		newLevel = (cmd.targetValue as Integer)
 	} else {
 		turnedOn = (cmd.value as Integer) > (0 as Integer)
 		newLevel = cmd.value as Integer
@@ -808,11 +859,13 @@ void processDeviceReport(cmd,  ep)
 	String priorSwitchState = targetDevice.currentValue("switch")
 	String newSwitchState = (turnedOn ? "on" : "off")
 	Integer priorLevel = targetDevice.currentValue("level")
-	Integer targetLevel = ((newLevel == 99) ? 100 : newLevel)
-	
-	if ((priorLevel == 99) && (newLevel == 99)) { targetLevel = 99 }
-		else if ((priorLevel == 100) && (newLevel == 99)) { targetLevel = 100 }
-			else targetLevel = newLevel
+	Integer targetLevel
+
+	if (newLevel == 99)
+	{
+		if ( priorLevel == 100) targetLevel = 100
+		if ( priorLevel == 99) targetLevel = 99
+	} else targetLevel = newLevel
 	
     if (hasSwitch && (priorSwitchState != newSwitchState))
 	{
