@@ -1,7 +1,10 @@
 # HubitatCustom
 
 ## Current Plans . . .
-I'm currently revising the code to simplify some of the coding, expand the functionality, and make it a bit more modular / re-usable. I've hit some snags due to platform bugs, but most (if not all) of these should be fixed in the 2.2.5 Hubitat release and I can get back to improving this driver -- so expect an update a few weeks after the 2.2.5 release.
+Feb. 2, 2021: Update - I'm still working on revisions with focus on better endpoint support and better handling of concurrency. This will probably be a few more weeks.
+
+### Donate
+Some have asked if they could donate something to me for this work.  I am not asking for donations for myself. However, if this driver helped you, I ask instead that you take whatever you think you would have donated and find food bank or other charity in your area and donate it to them instead (there are plenty of online foodbank sites). Here's one I can suggest: https://foodbankcenc.org/ . I opened an issue "Donate"- let's hear from those who have given something in response!
 
 ### What's New - Beta Version 0.0.8
 Version 0.0.8
