@@ -12,6 +12,9 @@ metadata {
 		capability "SwitchLevel"
 		capability "ChangeLevel"
 		
+		command "deleteChildDevices"
+		command "createChildDevices"
+		
 		command "test"
 		command "preCacheReports"
 		command "getCachedVersionReport"
@@ -23,12 +26,66 @@ metadata {
 	{
 		input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
 		input name: "txtEnable", type: "bool", title: "Enable text logging", defaultValue: true
+		input name: "superviseEnable", type: "bool", title: "Enable Command Supervision if supported", defaultValue: true
 		
 		// The following preferences are only for use while debugging. Remove them from final code
 		input name: "remindEnable", type: "bool", title: "Enable Code To-Do Reminders", defaultValue: true
     }
 }
 
+void deleteChildDevices()
+{
+	getChildDevices()?.each
+	{ child ->
+		deleteChildDevice(child.deviceNetworkId)
+	}
+}
+
+void createChildDevices()
+{	
+	Integer mfr = 	device.getDataValue("manufacturer").toInteger()
+	Integer type = 	device.getDataValue("deviceType").toInteger()
+	Integer id = 	device.getDataValue("deviceId").toInteger()
+	
+	Short numberOfEndPoints = getCachedMultiChannelEndPointReport().endPoints
+	log.debug "numberOfEndPoints is ${numberOfEndPoints}."
+
+
+	getChildDevices()?.each
+	{ child ->	
+	
+		List childNetIdComponents = child.deviceNetworkId.split("-ep")
+                    
+		if (childNetIdComponents.size() != 2) {
+			log.debug "child componenent ${child.displayName} to be deleted!"	
+			
+		} else {
+            Boolean endPointInRange = ((0 as Short) < (childNetIdComponents[1] as Short)) && ((childNetIdComponents[1] as Short) < numberOfEndPoints)
+			Boolean parentNetIdMatches = (childNetIdComponents[0]  == device.deviceNetworkId)
+			
+            if (parentNetIdMatches && endPointInRange ) {
+				log.debug "child componenent ${child.displayName} is a valid child device!"
+		    } else {
+				log.debug "child componenent ${child.displayName} NOT a valid child device for this driver!"
+			}
+		}
+	}
+	/*
+	def endpointInfo = endPointMap?.find{ (it.manufacturer == mfr) && (it.deviceType == type) && (it.deviceId 	== id)}
+	if (logEnable) log.debug "Endpoint Info is: ${endpointInfo}"	
+	
+	endpointInfo.ep.each{k, v ->
+		def childNetworkID = "${device.deviceNetworkId}-ep${"${k}".padLeft(3, "0") }"
+		def cd = getChildDevice(childNetworkID)
+		if (!cd) {
+			log.info "creating child device: ${childNetworkID}"
+			addChildDevice("hubitat", v.driver, childNetworkID, [name: "${device.displayName}-${v.name}", isComponent: false])
+		} else {
+			log.info "Child device: ${childNetworkID} already exist. No need to re-create."
+		}
+	}	
+	*/
+}
 void installed() { initialize() }
 
 void configure() { initialize() }
@@ -163,14 +220,17 @@ SynchronousQueue myReportQueue(String reportClass)
 }
 
 ///   Functions to generate keys used to access the concurrent Hash Maps and to store into the hash maps ///
+Integer getManufacturer() { device.getDataValue("manufacturer").toInteger() }
+Integer getDeviceType() { device.getDataValue("deviceType").toInteger() }
+Integer getDeviceId() {device.getDataValue("deviceId").toInteger() }
 
 String productKey() // Generates a key based on manufacturer / device / firmware. Data is shared among all similar end-devices.
 {
 	if (remindEnable) log.warn "productKey function should be updated with a hash based on inclusters as some devices may remove change their inclusters depending on pairing state. for example, Zooz Zen 18 motion sensor may or may not show with a battery!"
 	
-	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("manufacturer").toInteger(), 2)
-	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceType").toInteger(), 2)
-	String deviceID = 		hubitat.helper.HexUtils.integerToHexString( device.getDataValue("deviceId").toInteger(), 2) 
+	String manufacturer = 	hubitat.helper.HexUtils.integerToHexString( getManufacturer(), 2)
+	String deviceType = 	hubitat.helper.HexUtils.integerToHexString( getDeviceType(), 2)
+	String deviceID = 		hubitat.helper.HexUtils.integerToHexString( getDeviceId(), 2) 
 
 	String key = "${manufacturer}:${deviceType}:${deviceID}:"
 	return key
@@ -200,6 +260,7 @@ hubitat.zwave.Command  getCachedVersionCommandClassReport(Short requestedCommand
 	} else {
 		sendToDevice(secure(zwave.versionV3.versionCommandClassGet(requestedCommandClass: requestedCommandClass )))
 		cmd = myReportQueue("8614").poll(10, TimeUnit.SECONDS)
+		if(cmd.is( null ) ) {log.warn "Device ${device.displayName}: failed to retrieve a requested command class ${requestedCommandClass}."; return null }
 		ClassReports.put(cmd.requestedCommandClass, cmd)
 	}
 	return ClassReports?.get(requestedCommandClass)
@@ -393,9 +454,25 @@ Integer implementsZwaveClass(Short commandClass, Short ep = null )
 @Field static ConcurrentHashMap<String, Short> supervisionSessionIDs = new ConcurrentHashMap<String, Short>()
 @Field static ConcurrentHashMap<String, Short> supervisionSentCommands = new ConcurrentHashMap<String, ConcurrentHashMap<Short, hubitat.zwave.Command>>()
 
+@Field static ConcurrentHashMap<String, ConcurrentHashMap> supervisionRejected = new ConcurrentHashMap<String, ConcurrentHashMap<String, Boolean>>()
+
+Boolean commandSupervisionNotSupported(cmd) {	
+	Boolean previouslyRejected = ( supervisionRejected.get(firmwareKey())?.get(cmd.CMD) ) ? true : false 
+	log.debug "Is class ${cmd.CMD} unsupervisable? ${previouslyRejected}"
+	return previouslyRejected 
+}
+
+void markSupervisionNotSupported(cmd) {	
+	supervisionRejected.get(firmwareKey(), new ConcurrentHashMap<String, Boolean>() ).put(cmd.CMD, true )
+}
+
 def supervise(hubitat.zwave.Command command)
 {
-    if (implementsZwaveClass(0x6C))
+log.debug "SuperviseEnabled is: " + superviseEnable
+log.debug "CommandSupervisionNotSupported is: " + commandSupervisionNotSupported(command)
+log.debug "implementsZwaveClass is: " + implementsZwaveClass(0x6C)
+
+    if (superviseEnable && (!commandSupervisionNotSupported(command)) && implementsZwaveClass(0x6C))
 	{
 		// Get the next session ID, but if there is no stored session ID, initialize it with a random value.
 		Short nextSessionID = supervisionSessionIDs.get(device.getDeviceNetworkId() as String,((Math.random() * 32) % 32) as Short )
@@ -430,14 +507,23 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionReport cmd) {
 
 	hubitat.zwave.Command whatWasSent = supervisionSentCommands?.get(device.getDeviceNetworkId() as String)?.get(cmd.sessionID)
 
-	if ((cmd.status as Integer) == (0x02 as Integer)) {
-		log.warn "A Supervised command sent to device ${device.displayName} failed. The command that failed was: ${whatWasSent}."
-	} else if (logEnable){
-		log.debug "Results of supervised message is a report: ${cmd}, which was received in response to original command: " + whatWasSent
+	switch (cmd.status)
+	{
+		case 0x00:
+			log.warn "Device ${device.displayName}: A Supervised command sent to device ${device.displayName} is not supported. Command was: ${whatWasSent}. Re-sending without supervision."
+			markSupervisionNotSupported(whatWasSent)
+			sendToDevice(secure(whatWasSent))
+			break
+		case 0x01:
+			if (txtEnable) log.info "Device ${device.displayName}: Still processing command: ${whatWasSent}."
+		case 0x02:
+			log.warn "Device ${device.displayName}: A Supervised command sent to device ${device.displayName} failed. The command that failed was: ${whatWasSent}."
+			break
+		case 0xFF:
+			if (txtEnable) log.info "Device ${device.displayName}: Successfully processed command ${whatWasSent}."
+			break
 	}
 }
-
-
 
 //////////////////////////////////////////////////////////////////////
 //////                  Z-Wave Helper Functions                ///////
@@ -549,50 +635,52 @@ void sendEventToAll(Map event)
 
 Short getEndpoint(com.hubitat.app.DeviceWrapper device)
 {
+	if (device.is( null )) return null 
+	
 	return device.deviceNetworkId.split("-ep")[-1] as Short
 }
 
 void componentRefresh(cd){
     if (logEnable) log.info "received refresh request from component ${cd.displayName}"
-	refresh(cd)
+	refresh(cd:cd)
 }
 
 void componentOn(cd){
     log.debug "received componentOn request from ${cd.displayName}"
     // getChildDevice(cd.deviceNetworkId).parse([[name:"switch", value:"on", descriptionText:"${cd.displayName} was turned on"]])
-	on(cd)
+	on(cd:cd)
 }
 
 void componentOff(cd){
     log.debug "received componentOff request from ${cd.displayName}"
     // getChildDevice(cd.deviceNetworkId).parse([[name:"switch", value:"off", descriptionText:"${cd.displayName} was turned off"]])
-	off(cd)
+	off(cd:cd)
 }
 
 void componentSetLevel(cd,level,transitionTime = null) {
     if (logEnable) log.info "received setLevel(${level}, ${transitionTime}) request from ${cd.displayName}"
     // getChildDevice(cd.deviceNetworkId).parse([[name:"level", value:level, descriptionText:"${cd.displayName} level was set to ${level}%", unit: "%"]])
-	setLevel(level, transitionTime, cd)
+	setLevel(level:level, duration:transitionTime, cd:cd)
 }
 
 void componentStartLevelChange(cd, direction) {
     if (logEnable) log.info "received startLevelChange(${direction}) request from ${cd.displayName}"
-	startLevelChange(direction, cd)
+	startLevelChange(direction:direction, cd:cd)
 }
 
 void componentStopLevelChange(cd) {
     if (logEnable) log.info "received stopLevelChange request from ${cd.displayName}"
-	stopLevelChange(cd)
+	stopLevelChange(cd:cd)
 }
 
 void componentSetSpeed(cd, speed) {
     if (logEnable) log.info "received setSpeed(${speed}) request from ${cd.displayName}"
 	log.warn "componentSetSpeed not yet implemented in driver!"
     // getChildDevice(cd.deviceNetworkId).parse([[name:"level", value:level, descriptionText:"${cd.displayName} level was set to ${level}%", unit: "%"]])
-	setSpeed(speed, cd)
+	setSpeed(speed:speed, cd:cd)
 }
 
-void setSpeed(speed, cd = null )
+void setSpeed(Map params = [speed: null , cd: null ], speed)
 {
 	def targetDevice = (cd ? cd : device)
 	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
@@ -600,7 +688,7 @@ void setSpeed(speed, cd = null )
 	log.debug "Device ${targetDevice.displayName}: called setSpeed. Child device: ${ (cd) ? true : false }"
 }
 
-void setPosition(position, cd = null )
+void setPosition(Map params = [position: null , cd: null ], position )
 {
 	def targetDevice = (cd ? cd : device)
 	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
@@ -609,13 +697,13 @@ void setPosition(position, cd = null )
 
 }
 
-void close() {
+void close( cd = null ) {
 	def targetDevice = (cd ? cd : device)
 	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
 	log.warn "Device ${targetDevice.displayName}: called close(). Function not implemented."
 }
 
-void open() {
+void open( cd = null ) {
 	def targetDevice = (cd ? cd : device)
 	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
 	log.warn "Device ${targetDevice.displayName}: called close(). Function not implemented."
@@ -724,119 +812,96 @@ void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelReport
 	if (!isDimmer && !hasDimmer) log.warn "For device ${targetDevice.displayName} receive a report which wasn't processed. Need to check report handling code." + cmd
 }
 
-
-void on(cd = null ) {
-	def targetDevice = (cd ? cd : device)
-	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
-    
+void on(Map params = [cd: null , duration: null , level: null ])
+{
+	log.debug "In function on(Map ...), map value is: $params"
+	def targetDevice = (params.cd ? params.cd : device)
+	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+    Map levelEvent = null 
+	
 	if (implementsZwaveClass(0x26, ep)) // Multilevel  type device
 	{ 
-		Integer level = (targetDevice.currentValue("level") as Integer) ?: 100
-        level = ((level < 1) || (level > 100)) ? 100 : level // If level got set to less than 1 somehow,then turn it on to 100%
-		if (txtEnable) log.info "Device ${targetDevice.displayName}: Turned On at Level: ${level}."
+		Short level = params.level ? params.level : (targetDevice.currentValue("level") as Short ?: 100)
+        level = Math.min(Math.max(level, 1), 100) // Level betweeen 1 and 100%
+	
+		sendToDevice(secure(supervise(zwave.switchMultilevelV4.switchMultilevelSet(value: Math.min(level, 99), dimmingDuration:(params.duration as Short) )), ep) )
 
-		sendToDevice(secure(supervise(zwave.switchMultilevelV4.switchMultilevelSet(value: ((level > 99) ? 99 : level))), ep)	)	
-		//sendToDevice(secure(supervise(zwave.basicV2.basicSet(value: ((level > 99) ? 99 : level))), ep)	)
-		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
-		targetDevice.sendEvent(name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} set to level ${level}%", type: "digital")
+		levelEvent = [name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} set to level ${level}%", type: "digital"]
 	} 
-	else if (implementsZwaveClass(0x25, ep)) // Switch Binary Type device
-	{
-		if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning to: On."
+	else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
 		sendToDevice(secure(supervise(zwave.switchBinaryV1.switchBinarySet(switchValue: 255 )), ep))
-		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
 	}
-	else if (implementsZwaveClass(0x20, ep)) // Basic Set Type device
-	{
+	else if (implementsZwaveClass(0x20, ep)) { // Basic Set Type device
 		log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
-		if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning to: On."
-		sendToDevice(secure(zwave.basicV2.basicSet(value: 55 ), ep))
-		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
+		sendToDevice(secure(zwave.basicV2.basicSet(value: 0xFF ), ep))
 	} else  {
 		log.debug "Error in function on() - device ${targetDevice.displayName} does not implement a supported class"
+	}
+	
+	if (targetDevice.currentValue("switch") == "off") 
+	{	
+		if (logEnable) log.debug "Device ${targetDevice.displayName}: Turning switch from off to on."
+		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
+		if (levelEvent) 
+			{
+				targetDevice.sendEvent(levelEvent)
+				log.debug "Device ${targetDevice.displayName}: Sending level event: ${levelEvent}."
+			}
+	} else {
+			if (logEnable) log.debug "Device ${targetDevice.displayName}: Switch already off. Inhibiting sending of off event."
 	}
 }
 
 
-void off(cd = null ) {
-	def targetDevice = (cd ? cd : device)
-	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+void off(Map params = [cd: null , duration: null ]) {
+
+	log.debug "In function off(Map ...), map value is: $params"
+	def targetDevice = (params.cd ? params.cd : device)
+	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
 	
 	if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning device to: Off."
 
 	if (implementsZwaveClass(0x26, ep)) { // Multilevel  type device
-		sendToDevice(secure(zwave.switchMultilevelV4.switchMultilevelSet(value: 0), ep)	)	
+		sendToDevice(secure(supervise(zwave.switchMultilevelV4.switchMultilevelSet(value: 0, dimmingDuration:params.duration as Short)), ep)	)	
 	} else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
 		sendToDevice(secure(supervise(zwave.switchBinaryV1.switchBinarySet(switchValue: 0 )), ep))
 	} else if (implementsZwaveClass(0x20, ep)) { // Basic Set Type device
-		log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
+		log.warn "Device ${targetDevice.displayName}: Using Basic Set to turn on device. A more specific command class should be used!"
 		sendToDevice(secure(supervise(zwave.basicV2.basicSet(value: 0 )), ep))
 	} else {
-		log.debug "Error in function off() - device ${targetDevice.displayName} does not implement a supported class"
+		log.debug "Device ${targetDevice.displayName}: Error in function off(). Device does not implement a supported class"
 		return
 	}
-	targetDevice.sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} turned off", type: "digital")		
-	
+
+	if (targetDevice.currentValue("switch") == "on") 
+	{	
+		if (logEnable) log.debug "Device ${targetDevice.displayName}: Turning switch from on to off."
+		targetDevice.sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} turned off", type: "digital")
+	} else {
+		if (logEnable) log.debug "Device ${targetDevice.displayName}: Switch already off. Inhibiting sending of off event."
+	}
 }
 
-void setLevel(level, duration = 0, cd = null )
+void setLevel(level, duration = null )
+	{
+		setLevel(level:level, duration:duration)
+	}
+	
+void setLevel(Map params = [cd: null , level: null , duration: null ])
 {
-	def targetDevice = (cd ?: device)
-	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
+	log.debug "Called setLevel with a parameter map: ${params}"
 	
-	if (logEnable) log.debug "Device ${targetDevice.displayName}: Executing function setlevel(level = ${level}, duration = ${duration})."
-	if ( level > 100 ) level = 100
-	if ( duration < 0 ) duration = 0
-	if ( duration > 120 ) 
-		{
-			log.warn "Device ${targetDevice.displayName}: tried to set a dimming duration value greater than 120 seconds. To avoid excessive turn on / off delays, this driver only allows dimming duration values of up to 120."
-			duration = 120
-		}
-
-	if (level <= 0)
-	{
-		// Turn off the switch, but don't change level -- it gets used when turning back on!
-		Boolean stateChange = ((targetDevice.currentValue("switch") == "on") ? true : false)
+	def targetDevice = (params.cd ? params.cd : device)
+	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
-		if (implementsZwaveClass(0x26, ep)) { // Multilevel type device
-			sendToDevice(secure(zwave.switchMultilevelV4.switchMultilevelSet(value: 0, dimmingDuration: duration), ep ))	
-		} else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
-			sendToDevice(secure(supervise(zwave.switchBinaryV1.switchBinarySet(switchValue: 0)), ep))
-		} else if (implementsZwaveClass(0x20, ep)) { // Basic Set Type device
-			log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
-			sendToDevice(secure(supervise(zwave.basicV2.basicSet(value: 0) ), ep))
-		} else {
-			log.debug "Error in function setLevel() - device ${targetDevice.displayName} does not implement a supported class"
-			return
-		}
-		if (logEnable) log.debug "For device ${targetDevice.displayName}, current switch value is ${targetDevice.currentValue("switch")}"
-		if (targetDevice.currentValue("switch") == "on") 
-		{	
-			if (logEnable) log.debug "Turning switch from on to off in setlevel function"
-			targetDevice.sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} turned off", type: "digital")
-		}		
-		return
-	} else 
-	{
+	Short newDimmerLevel = Math.min(Math.max(params.level as Integer, 0), 99) as Short
+	Short transitionTime = null 
+	if (params.duration) transitionTime = params.duration as Short
 	
-		if (implementsZwaveClass(0x26, ep)) { // Multilevel type device
-			sendToDevice(secure(zwave.switchMultilevelV4.switchMultilevelSet(value: ((level > 99) ? 99 : level), dimmingDuration: duration), ep ))
-		} else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
-			sendToDevice(secure(supervise(zwave.switchBinaryV1.switchBinarySet(switchValue: (level > 99) ? 99 : level)), ep ))
-		} else if (implementsZwaveClass(0x20, ep)) { // Basic Set Type device
-			log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
-			sendToDevice(secure(supervise(zwave.basicV2.basicSet(value: (level > 99) ? 99 : level) ), ep))
-		} else {
-			log.debug "Error in function setLevel() - device ${targetDevice.displayName} does not implement a supported class"
-			return
-		}
-		if (logEnable) log.debug "Current switch value: ${targetDevice.currentValue("switch")}, is it off: ${targetDevice.currentValue("switch") == "off"}"
-		if (targetDevice.currentValue("switch") == "off") 
-		{	
-			if (logEnable) log.debug "Turning switch from off to on in setlevel function"
-			targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
-		}
-		targetDevice.sendEvent(name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} set to ${level}%", type: "digital")
+	if (newDimmerLevel <= 0) {
+		off(cd:cd, duration:transitionTime)
+	} else {
+		on(cd:cd,level:newDimmerLevel, duration:transitionTime)
 	}
 }
 
