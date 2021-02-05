@@ -125,50 +125,46 @@ void refresh()
 //////        Report Pre-Caching Library Functions            ///////
 ////////////////////////////////////////////////////////////////////// 
 
-hubitat.zwave.Command  getCachedVersionReport() 										
-								{ getReportCachedByNetworkId(zwave.versionV1.versionGet(), null )}
+hubitat.zwave.Command  getCachedVersionReport() { 
+								getReportCachedByNetworkId(zwave.versionV1.versionGet(), null )
+							}
 								
-hubitat.zwave.Command  getCachedNotificationSupportedReport(Short ep = null )					
-								{ 
-									if (implementsZwaveClass(0x71, ep) < 2) return null
-									getReportCachedByProductId(zwave.notificationV8.notificationSupportedGet(), ep)
-								}
+hubitat.zwave.Command  getCachedNotificationSupportedReport(Short ep = null ) { 
+								if (implementsZwaveClass(0x71, ep) < 2) return null
+								getReportCachedByProductId(zwave.notificationV8.notificationSupportedGet(), ep)
+							}
 								
-hubitat.zwave.Command  getCachedMultiChannelEndPointReport()							
-								{ getReportCachedByProductId(zwave.multiChannelV4.multiChannelEndPointGet(), null )}
+hubitat.zwave.Command  getCachedMultiChannelEndPointReport() { 
+								getReportCachedByProductId(zwave.multiChannelV4.multiChannelEndPointGet(), null )
+							}
 								
-hubitat.zwave.Command  getCachedMultiChannelCapabilityReport(Short ep) 					
-								{ getReportCachedByProductId(zwave.multiChannelV4.multiChannelCapabilityGet(endPoint: ep), null )}
+hubitat.zwave.Command  getCachedMultiChannelCapabilityReport(Short ep)  { 
+								getReportCachedByProductId(zwave.multiChannelV4.multiChannelCapabilityGet(endPoint: ep), null )
+							}
 								
-hubitat.zwave.Command  getCachedCentralSceneSupportedReport()							
-								{ getReportCachedByProductId(zwave.centralSceneV3.centralSceneSupportedGet(), null ) }
+hubitat.zwave.Command  getCachedCentralSceneSupportedReport() { 
+								getReportCachedByProductId(zwave.centralSceneV3.centralSceneSupportedGet(), null ) 
+							}
 								
-hubitat.zwave.Command  getCachedMeterSupportedReport(Short ep = null )						
-								{ 
-									if (implementsZwaveClass(0x32, ep) < 2) return null
-									getReportCachedByProductId(zwave.meterV5.meterSupportedGet(), ep) 
-								}
+hubitat.zwave.Command  getCachedMeterSupportedReport(Short ep = null ) { 
+								if (implementsZwaveClass(0x32, ep) < 2) return null
+								getReportCachedByProductId(zwave.meterV5.meterSupportedGet(), ep) 
+							}
 														
-hubitat.zwave.Command  getCachedProtectionSupportedReport(Short ep = null )					
-								{ 
-									if (implementsZwaveClass(0x75, ep) < 2) return null
-									getReportCachedByProductId(zwave.protectionV2.protectionSupportedGet(), ep) 
-								}
+hubitat.zwave.Command  getCachedProtectionSupportedReport(Short ep = null ) { 
+								if (implementsZwaveClass(0x75, ep) < 2) return null
+								getReportCachedByProductId(zwave.protectionV2.protectionSupportedGet(), ep) 
+							}
 								
-hubitat.zwave.Command  getCachedSwitchMultilevelSupportedReport(Short ep = null )				
-								{ 
-									if (implementsZwaveClass(0x26, ep) < 3) return null
-									getReportCachedByProductId(zwave.switchMultilevelV3.switchMultilevelSupportedGet(), ep) 
-								}
+hubitat.zwave.Command  getCachedSwitchMultilevelSupportedReport(Short ep = null ) { 
+								if (implementsZwaveClass(0x26, ep) < 3) return null
+								getReportCachedByProductId(zwave.switchMultilevelV3.switchMultilevelSupportedGet(), ep) 
+							}
 
-hubitat.zwave.Command  getCachedSensorMultilevelSupportedSensorReport(Short ep = null )		
-								{ 
-									if (implementsZwaveClass(0x31, ep) < 5) return null
-									getReportCachedByProductId(zwave.sensorMultilevelV11.sensorMultilevelSupportedGetSensor(), ep) 
-								}
-
-//  ==============================================
-
+hubitat.zwave.Command  getCachedSensorMultilevelSupportedSensorReport(Short ep = null ) { 
+								if (implementsZwaveClass(0x31, ep) < 5) return null
+								getReportCachedByProductId(zwave.sensorMultilevelV11.sensorMultilevelSupportedGetSensor(), ep) 
+							}
 
 // =============================================
 void preCacheReports()
