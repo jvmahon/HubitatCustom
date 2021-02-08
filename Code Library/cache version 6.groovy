@@ -14,7 +14,11 @@ metadata {
 		
 		command "deleteChildDevices"
 		command "createChildDevices"
-		
+
+        attribute "buttoonTripleTapped", "number"	
+		attribute "buttonFourTaps", "number"	
+		attribute "buttonFiveTaps", "number"	         
+		attribute "multiTapButton", "number"		
 		command "test"
 		command "preCacheReports"
 		command "getCachedVersionReport"
@@ -924,4 +928,57 @@ void test(){
 		cmds.add(secure(supervise(zwave.switchMultilevelV1.switchMultilevelStopLevelChange()), ep))
 		cmds.add(secure(zwave.basicV1.basicGet(), ep))
 	sendToDevice(cmds)
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+///////////////                  Central Scene Processing          ////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////
+
+@Field static  ConcurrentHashMap centralSceneButtonState = new ConcurrentHashMap<String, String>()
+
+String getCentralSceneButtonState(Integer button) { 
+ 	String key = "${device.deviceNetworkId}.Button.${button}"
+	return centralSceneButtonState.get(key)
+}
+
+String setCentralSceneButtonState(Integer button, String state) {
+ 	String key = "${device.deviceNetworkId}.Button.${button}"
+	centralSceneButtonState.put(key, state)
+	return centralSceneButtonState.get(key)
+}
+
+void getCentralSceneInfo() {
+	sendToDevice(secure( zwave.centralSceneV3.centralSceneSupportedGet() ))
+}
+
+void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneNotification cmd)
+{
+	if ((getCentralSceneButtonState(cmd.sceneNumber as Integer) == "held") && (cmd.keyAttributes == 2)) return
+
+    Map event = [value:cmd.sceneNumber, type:"physical", unit:"button#", isStateChange:true]
+	
+	event.name = [	0:"pushed", 1:"released", 2:"held",  3:"doubleTapped", 
+					4:"buttoonTripleTapped", 5:"buttonFourTaps", 6:"buttonFiveTaps"].get(cmd.keyAttributes as Integer)
+	
+	String tapDescription = [	0:"Pushed", 1:"Released", 2:"Held",  3:"Double-Tapped", 
+								4:"Three Taps", 5:"Four Taps", 6:"Five Taps"].get(cmd.keyAttributes as Integer)
+    
+	setCentralSceneButtonState(cmd.sceneNumber, event.name)	
+	
+	event.descriptionText="${device.displayName}: Button #${cmd.sceneNumber}: ${tapDescription}"
+	
+	log.debug "Central Scene Event is: ${event}."
+
+	sendEvent(event)
+	
+	// Next code is for the custom attribute "multiTapButton".
+	Integer taps = [0:1, 3:2, 4:3, 5:4, 6:5].get(cmd.keyAttributes as Integer)
+	if ( taps )
+	{
+		event.name = "multiTapButton"
+		event.unit = "Button #.Tap Count"
+		event.value = ("${cmd.sceneNumber}.${taps}" as Float)
+		log.debug "multitap event is: ${event}."
+		sendEvent(event)		
+	} 
 }
