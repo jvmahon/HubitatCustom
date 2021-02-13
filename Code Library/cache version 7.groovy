@@ -10,7 +10,7 @@ metadata {
 		capability "Refresh"
 		capability "Switch"
 		capability "SwitchLevel"
-		capability "ChangeLevel"
+		// capability "ChangeLevel"
 		
 		command "deleteChildDevices"
 		command "createChildDevices"
@@ -19,7 +19,7 @@ metadata {
 		attribute "buttonFourTaps", "number"	
 		attribute "buttonFiveTaps", "number"	         
 		attribute "multiTapButton", "number"		
-		command "test"
+
 		command "preCacheReports"
 		command "getCachedVersionReport"
 		command "getCachedNotificationSupportedReport"
@@ -76,78 +76,239 @@ void createChildDevices()
 	Integer type = 	device.getDataValue("deviceType").toInteger()
 	Integer id = 	device.getDataValue("deviceId").toInteger()
 	
-	Short numberOfEndPoints = getCachedMultiChannelEndPointReport().endPoints
-	log.debug "numberOfEndPoints is ${numberOfEndPoints}."
+	hubitat.zwave.Command endPointReport = getCachedMultiChannelEndPointReport()
+	if (!endPointReport) return
+	
+	Short numberOfEndPoints = endPointReport.endPoints
+	log.debug "Device ${device.displayName}: has ${numberOfEndPoints} endpoints."
 
-
+	// Delete child devices that don't use the proper network ID form (parent ID, followed by "-ep" followed by endpoint number).
 	getChildDevices()?.each
 	{ child ->	
 	
 		List childNetIdComponents = child.deviceNetworkId.split("-ep")
                     
 		if (childNetIdComponents.size() != 2) {
-			log.debug "child componenent ${child.displayName} to be deleted!"	
+			log.debug "Device ${device.displayName}: child component ${child.displayName} is not a valid child device and is being deleted!"
+			deleteChildDevice(child.deviceNetworkId)			
 			
 		} else {
-            Boolean endPointInRange = ((0 as Short) < (childNetIdComponents[1] as Short)) && ((childNetIdComponents[1] as Short) < numberOfEndPoints)
+            Boolean endPointInRange = ((0 as Short) < (childNetIdComponents[1] as Short)) && ((childNetIdComponents[1] as Short) <= numberOfEndPoints)
 			Boolean parentNetIdMatches = (childNetIdComponents[0]  == device.deviceNetworkId)
 			
             if (parentNetIdMatches && endPointInRange ) {
-				log.debug "child componenent ${child.displayName} is a valid child device!"
+				log.debug "Device ${device.displayName}: child component ${child.displayName} is a valid child device!"
 		    } else {
-				log.debug "child componenent ${child.displayName} NOT a valid child device for this driver!"
+				log.debug "Device ${device.displayName}: child component ${child.displayName} NOT a valid child device for this driver!"
+				deleteChildDevice(child.deviceNetworkId)	
 			}
 		}
 	}
-	/*
-	def endpointInfo = endPointMap?.find{ (it.manufacturer == mfr) && (it.deviceType == type) && (it.deviceId 	== id)}
-	if (logEnable) log.debug "Endpoint Info is: ${endpointInfo}"	
 	
-	endpointInfo.ep.each{k, v ->
-		def childNetworkID = "${device.deviceNetworkId}-ep${"${k}".padLeft(3, "0") }"
-		def cd = getChildDevice(childNetworkID)
+	Short thisKid = 1
+	for ( thisKid; thisKid <= numberOfEndPoints; thisKid++)
+	{
+		String childNetworkId = "${device.deviceNetworkId}-ep${"${thisKid}".padLeft(3, "0") }"
+		def cd = getChildDevice(childNetworkId)
 		if (!cd) {
-			log.info "creating child device: ${childNetworkID}"
-			addChildDevice("hubitat", v.driver, childNetworkID, [name: "${device.displayName}-${v.name}", isComponent: false])
+			log.info "Device ${device.displayName}: creating child device: ${childNetworkId}"
+			String childDriver
+			
+			if (implementsZwaveClass(0x25, thisKid ) ){  // Binary Switch
+				if (implementsZwaveClass(0x32, thisKid ) ){ // Meter Supported
+					childDriver = "Generic Component Metering Switch"
+				} else {
+					childDriver = "Generic Component Switch"
+				}
+			} else  if (implementsZwaveClass(0x26, thisKid ) ){ // MultiLevel Switch
+				childDriver = "Generic Component Dimmer"
+			}
+
+			addChildDevice("hubitat", childDriver, childNetworkId, [name: "${device.displayName}-ep${thisKid}", isComponent: false])
 		} else {
-			log.info "Child device: ${childNetworkID} already exist. No need to re-create."
+			log.info "Device ${device.displayName}: Child device with network id ${childNetworkId} already exist. No need to re-create."
 		}
-	}	
-	*/
+	}
 }
+
 void installed() { initialize() }
 
 void configure() { initialize() }
 
 void initialize( )
 {
-	preCacheReports()
+	// preCacheReports()
+	setInputControlParameterValuesToDeviceValue()
 }
 
-void refresh()
+void refresh(Map params = [cd: null ])
 {
+	def targetDevice = (params.cd ? params.cd : device)
+	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
+	
+	if (implementsZwaveClass(0x26, ep)) { // Multilevel  type device
+		sendToDevice(secure(zwave.switchMultilevelV4.switchMultilevelGet(), ep) )
+	} else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
+		sendToDevice(secure(zwave.switchBinaryV1.switchBinaryGet(), ep))
+	} else { // Basic Set Type device
+		log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
+		sendToDevice(secure(zwave.basicV2.basicGet(), ep))
+	}
+	
+	meterRefresh( ep )
+}
+
+void meterRefresh ( Short ep = null ) 
+{
+	if (!implementsZwaveClass(0x32, ep) ) return
+	log.debug "Meter types supported are: " + getElectricMeterScalesSupportedMap( ep )
+	
+	def targetDevice
+	if (ep) {
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Short) == ep}
+	} else { targetDevice = device }
+
+	if (implementsZwaveClass(0x32, ep) < 1)
+	{
+		log.warn "Called meterRefresh() for a Device ${targetDevice.displayName} that does not support metering. No Meter Refresh performed."
+		return
+	}
+
+    if (txtEnable) log.info "Refreshing Energy Meter values for device: ${targetDevice.displayName}."
+	
+	if (implementsZwaveClass(0x32, ep) == 1)
+	{
+		if (logEnable) log.debug "Performing a Version 1 Meter Get for device ${targetDevice.displayName}."
+		sendToDevice(secure(zwave.meterV1.meterGet(), ep))
+	} else {
+		Map<String, Boolean> metersSupported = getElectricMeterScalesSupportedMap( ep )
+		
+		if (logEnable) log.debug "Performing a Version 2+ Meter Get for device ${targetDevice.displayName}."
+		List<hubitat.zwave.Command> cmds = []
+			if (metersSupported.kWh) 			cmds << secure(zwave.meterV5.meterGet(scale: 0), ep)
+			if (metersSupported.kVAh) 			cmds << secure(zwave.meterV5.meterGet(scale: 1), ep)
+			if (metersSupported.Watts) 			cmds << secure(zwave.meterV5.meterGet(scale: 2), ep)
+			if (metersSupported.PulseCount) 	cmds << secure(zwave.meterV5.meterGet(scale: 3), ep)
+			if (metersSupported.Volts) 			cmds << secure(zwave.meterV5.meterGet(scale: 4), ep)
+			if (metersSupported.Amps) 			cmds << secure(zwave.meterV5.meterGet(scale: 5), ep)
+			if (metersSupported.PowerFactor) 	cmds << secure(zwave.meterV5.meterGet(scale: 6), ep)
+			if (metersSupported.kVar) 			cmds << secure(zwave.meterV5.meterGet(scale: 7, scale2: 0), ep)
+			if (metersSupported.kVarh) 			cmds << secure(zwave.meterV5.meterGet(scale: 7, scale2: 1), ep)
+		if (cmds) sendToDevice(cmds)	
+	}
+}
+
+Map<String, Boolean> getElectricMeterScalesSupportedMap( Short ep = null )
+{
+	def targetDevice
+	if (ep) {
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Short) == ep}
+	} else { targetDevice = device }	
+
+	hubitat.zwave.Command report = getCachedMeterSupportedReport( ep )
+	
+	if (! report) return null
+
+    if ((report.meterType as Integer) == 1 )
+    {
+		Map<String, Boolean> meterMap = [ 
+			kWh: 		(( report.scaleSupported & 0b00000001 ) as Boolean ),
+			kVAh:		(( report.scaleSupported & 0b00000010 ) as Boolean ),
+			Watts:		(( report.scaleSupported & 0b00000100 ) as Boolean ),
+			PulseCount:	(( report.scaleSupported & 0b00001000 ) as Boolean ),
+			Volts:		(( report.scaleSupported & 0b00010000 ) as Boolean ),
+			Amps:		(( report.scaleSupported & 0b00100000 ) as Boolean ),
+			PowerFactor:(( report.scaleSupported & 0b01000000 ) as Boolean )
+		]
+		
+        if ( report.hasProperty("moreScaleType") ) {
+			meterMap.put("kVar"		, ( report.scaleSupportedBytes[1] & 0b00000001 ) as Boolean)
+			meterMap.put("kVarh"	, ( report.scaleSupportedBytes[1] & 0b00000010 ) as Boolean)
+        } else {
+            meterMap.put("kVar"	, false )
+			meterMap.put("kVarh", false )
+        }
+		
+		return meterMap
+        
+    } else  {
+		log.warn "Device ${targetDevice.displayName}: Received a meter support type of ${report.meterType} which is not processed by this code."
+		return null
+	}
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+void zwaveEvent(hubitat.zwave.commands.meterv5.MeterReport cmd, Short ep = null )
+{
+	def targetDevice
+	if (ep) {
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Short) == ep}
+	} else { targetDevice = device }	
+	
+	if (logEnable && cmd.hasProperty("rateType") && (cmd.rateType != 1)) log.warn "Device ${targetDevice.displayName}: Unexpected Meter rateType received. Value is: ${cmd.rateType}."
+	
+	if (cmd.meterType == 1)
+	{
+		try {
+			switch (cmd.scale as Integer)
+			{
+			case 0: // kWh
+				targetDevice.sendEvent(name: "energy", value: cmd.scaledMeterValue, unit: "kWh")
+				if (txtEnable) log.info "${targetDevice.displayName}: Energy report received with value of ${cmd.scaledMeterValue} kWh"
+				break
+				
+			case 1: // kVAh
+				if (txtEnable) log.info "Received a meter report with unsupported type: kVAh. This is not a Hubitat Supported meter value."
+				break
+				
+			case 2: // W
+				targetDevice.sendEvent(name: "power", value: cmd.scaledMeterValue, unit: "W")
+				if (txtEnable) log.info "${targetDevice.displayName}: Power report received with value of ${cmd.scaledMeterValue} W"
+				break	
+				
+			case 3: // Pulse Count
+				if (txtEnable) log.info "Received a meter report with unsupported type: Pulse Count. This is not a Hubitat Supported meter value."
+			   break
+				
+			case 4: // V
+				targetDevice.sendEvent(name: "voltage", value: cmd.scaledMeterValue, unit: "V")
+				if (txtEnable) log.info "${targetDevice.displayName}: Voltage report received with value of ${cmd.scaledMeterValue} V"
+				break
+				
+			case 5: // A
+				targetDevice.sendEvent(name: "amperage", value: cmd.scaledMeterValue, unit: "A")
+				if (txtEnable) log.info "${targetDevice.displayName}: Amperage report received with value of ${cmd.scaledMeterValue} A"
+				break
+				
+			case 6: // Power Factor
+				if (txtEnable) log.info "Device ${targetDevice.displayName}: Received a meter report with unsupported type: Power Factor. This is not a Hubitat Supported meter value."
+				break
+				
+			case 7: // M.S.T. - More Scale Types
+				switch (cmd.scale2 as Integer)
+				{
+					case 0:
+						log.warn "Device ${targetDevice.displayName}: Received a meter report with unsupported type: More Scale Types / KVar. Report was: ${cmd}."
+					
+						break
+					case 1:
+						log.warn "Device ${targetDevice.displayName}: Received a meter report with unsupported type: More Scale Types / KVarh. Report was: ${cmd}."
+					
+						break
+					default:
+						log.warn "Device ${targetDevice.displayName}: Received a meter report with unsupported type: More Scale Types. Report was: ${cmd}."
+						break
+				} 
+			   break
+			}
+		} catch (ex)
+		{
+			log.debug "Error ${ex} processing report ${cmd}. Report is of class ${cmd.class}."
+		}
+	} else {
+		log.warn "Device ${targetDevice.displayName}: Received unexpected meter type for ${targetDevice.displayName}. Only type '1' (Electric Meter) is supported. Received type: ${cmd.meterType}"
+	}
+}
 
 
 //////////////////////////////////////////////////////////////////////
@@ -464,12 +625,8 @@ Integer implementsZwaveClass(Short commandClass, Short ep = null )
 			return null
 		}
 		
-	} else { 
-
-		if (deviceClasses.contains(commandClass))
-		{
-			return getCachedVersionCommandClassReport(commandClass).commandClassVersion
-		}	
+	} else  if (deviceClasses.contains(commandClass)) {
+		return getCachedVersionCommandClassReport(commandClass).commandClassVersion
 	} 
 	return null
 }
@@ -703,7 +860,7 @@ void componentSetSpeed(cd, speed) {
 void setSpeed(Map params = [speed: null , cd: null ], speed)
 {
 	def targetDevice = (cd ? cd : device)
-	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	log.warn "setSpeed function not implemented yet!"
 	log.debug "Device ${targetDevice.displayName}: called setSpeed. Child device: ${ (cd) ? true : false }"
 }
@@ -711,7 +868,7 @@ void setSpeed(Map params = [speed: null , cd: null ], speed)
 void setPosition(Map params = [position: null , cd: null ], position )
 {
 	def targetDevice = (cd ? cd : device)
-	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	log.warn "setPosition function not implemented yet!"
 	log.debug "Device ${targetDevice.displayName}: called setPosition. Child device: ${ (cd) ? true : false }"
 
@@ -719,13 +876,13 @@ void setPosition(Map params = [position: null , cd: null ], position )
 
 void close( cd = null ) {
 	def targetDevice = (cd ? cd : device)
-	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	log.warn "Device ${targetDevice.displayName}: called close(). Function not implemented."
 }
 
 void open( cd = null ) {
 	def targetDevice = (cd ? cd : device)
-	def ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	log.warn "Device ${targetDevice.displayName}: called close(). Function not implemented."
 }
 
@@ -755,6 +912,8 @@ def getTargetDeviceByEndPoint(Short ep = null )
 
 void zwaveEvent(hubitat.zwave.commands.switchbinaryv2.SwitchBinaryReport cmd, ep = null)
 {
+	if (logEnable) log.debug "Device ${device.displayName}: Received a SwitchBinaryReport ${cmd} for endpoint ${ep}."
+
 	def targetDevice = getTargetDeviceByEndPoint(ep)
 
 	if (! targetDevice.hasAttribute("switch")) log.warn "For device ${targetDevice.displayName}, received a Switch Binary Report for a device that does not have a switch!"
@@ -775,6 +934,8 @@ void zwaveEvent(hubitat.zwave.commands.switchbinaryv2.SwitchBinaryReport cmd, ep
 
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelReport cmd, Short ep = null)
 {
+	if (logEnable) log.debug "Device ${device.displayName}: Received a SwitchMultilevelReport ${cmd} for endpoint ${ep}."
+
 	def targetDevice = getTargetDeviceByEndPoint(ep)
 	
 	if (targetDevice.hasAttribute("position")) 
@@ -836,7 +997,7 @@ void on(Map params = [cd: null , duration: null , level: null ])
 {
 	log.debug "In function on(Map ...), map value is: $params"
 	def targetDevice = (params.cd ? params.cd : device)
-	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
     Map levelEvent = null 
 	
 	if (implementsZwaveClass(0x26, ep)) // Multilevel  type device
@@ -877,7 +1038,7 @@ void off(Map params = [cd: null , duration: null ]) {
 
 	log.debug "In function off(Map ...), map value is: $params"
 	def targetDevice = (params.cd ? params.cd : device)
-	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Integer) : null
+	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
 	if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning device to: Off."
 
@@ -943,12 +1104,7 @@ void stopLevelChange(cd = null ){
 	sendToDevice(cmds)
 }
 
-void test(){
-	List<hubitat.zwave.Command> cmds = []
-		cmds.add(secure(supervise(zwave.switchMultilevelV1.switchMultilevelStopLevelChange()), ep))
-		cmds.add(secure(zwave.basicV1.basicGet(), ep))
-	sendToDevice(cmds)
-}
+
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////                  Central Scene Processing          ////////////////////////////
@@ -1046,18 +1202,17 @@ List getOpenSmartHouseData()
 
     String DeviceInfoURI = "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/list.php?filter=manufacturer:0x${manufacturer}%20${deviceType}:${deviceID}"
 
-    def mydevice
+    Map thisDeviceData
     
-	// Map deviceFirmwareVersion = getFirmwareVersion()
 	hubitat.zwave.Command   versionReport = getCachedVersionReport() 
-	log.debug "Version report is: " + versionReport
+	if (!versionReport) { return null }
+	
 	Float deviceFWVersion = (versionReport.firmware0Version as Integer) + ((versionReport.firmware0SubVersion as Float) / 1000)
 	
-	log.debug "deviceInfoURI is: " + DeviceInfoURI
     httpGet([uri:DeviceInfoURI])
     { 
 		resp ->
-			mydevice = resp.data.devices.find 
+			thisDeviceData = resp.data.devices.find 
 			{ element ->
 	 
 				Minimum_Version = element.version_min.split("\\.")
@@ -1073,26 +1228,25 @@ List getOpenSmartHouseData()
 				return isCorrectRecord
 			}
 	}
-    if (! mydevice.id) 
+    if (! thisDeviceData?.id) 
 	{
 		log.warn "Device ${device.displayName}: No database entry found for manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}"
 		return null
 	}
     
-	log.debug "mydevice is: " + mydevice
-    String queryByDatabaseID= "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/read.php?device_id=${mydevice.id}"    
+    String queryByDatabaseID= "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/read.php?device_id=${thisDeviceData.id}"    
     
 	httpGet([uri:queryByDatabaseID]) { resp-> 
-				return resp.data.parameters
+				return resp?.data?.parameters
 			}
 }
 
 Map createInputControls(data)
 {
-	Map inputControls = [:]
-
+	if (!data) return null
 	if (logEnable) log.debug "Device ${device.displayName}: Creating Input Controls"
 	
+	Map inputControls = [:]	
 	data.each
 	{
 		if (it.bitmask.toInteger())
@@ -1140,20 +1294,26 @@ ConcurrentHashMap<Short, BigInteger> getPendingChangeMap()
 
 Map<Short, BigInteger> getParameterValuesFromDevice(Map options = [useCache: true ])
 {
-	parameterReports = allParameterReports.get(device.deviceNetworkId, new ConcurrentHashMap<Short, hubitat.zwave.Command>())
+	Map<Short,hubitat.zwave.Command> parameterReports = allParameterReports.get(device.deviceNetworkId, new ConcurrentHashMap<Short, hubitat.zwave.Command>())
 	
-	Map<Short, BigInteger> parameterValues =  [:]
-
-	if (options.useCache && (parameterReports.size() > 0)) 
+	ConcurrentHashMap inputs = getInputControlsForDevice()	
+			
+	Map<Short, BigInteger> parameterValues = [:]
+	
+	// Check if anything is missing from the cache!
+	Boolean haveAllConfigurationReports = true
+	if ((parameterReports.size() as Integer) != (inputs.size() as Integer)) {
+			haveAllConfigurationReports = false
+		}
+		
+	if (haveAllConfigurationReports && options.useCache && (parameterReports.size() > 0) ) 
 	{
-		log.debug "Getting parameter values from cached reports"
+		if (logEnable) log.debug "Device ${device.displayName}: Getting parameter values from cached reports"
 		parameterReports.each{ key, report ->
 			parameterValues.put(key as Short, report.scaledConfigurationValue as BigInteger)
 			}
 	} else {
-		log.debug "Getting parameter values from device."
-
-		ConcurrentHashMap inputs = getInputControlsForDevice()
+		if (logEnable) log.debug "Device ${device.displayName}: Getting parameter values from device."
 		hubitat.zwave.Command report = null
 		inputs.each 
 			{ k, v ->
@@ -1167,13 +1327,13 @@ Map<Short, BigInteger> getParameterValuesFromDevice(Map options = [useCache: tru
 				if (report) parameterValues.put(report.parameterNumber, newValue )
 			}
 	}
-	if (logEnable) log.debug "Device ${device.displayName}: Map of Parameter Values from Device is: ${ parameterValues} which correspond with reports ${parameterReports}"
+	if (logEnable) log.debug "Device ${device.displayName}: Map of Parameter Values reorted by device is: ${ parameterValues}."
 	return parameterValues
 }
 
 void setInputControlParameterValuesToDeviceValue()
 {
-	Map<Short, BigInteger> parameterValues =  getParameterValuesFromDevice()
+	Map<Short, BigInteger> parameterValues =  getParameterValuesFromDevice(useCache: true )
 	ConcurrentHashMap<Short, BigInteger> pendingChanges = getPendingChangeMap()
 	
 	parameterValues.each{ key, value ->
@@ -1202,9 +1362,8 @@ Map<Short, BigInteger> getParameterValuesFromInputControls()
 	
 	inputs.each { PKey , PData -> 
 			BigInteger newValue = 0
-			// if the setting returne an array, then its a bitmap control, and add together the values.
-			if (settings[PData.name] instanceof ArrayList) 
-			{
+			// if the setting returns an array, then it is a bitmap control, and add together the values.
+			if (settings[PData.name] instanceof ArrayList) {
 				settings[PData.name].each{ newValue += it as BigInteger }
 			} else  {   
 				newValue = settings[PData.name] as BigInteger  
@@ -1252,7 +1411,7 @@ void processPendingChanges()
 	}
 }
 
-void setParameter(Map params =  [ parameterNumber: null , value: null ] ){
+void setParameter(Map params = [parameterNumber: null , value: null ] ){
     if (params.parameterNumber.is( null ) || params.value.is( null ) ) {
 		log.warn "Device ${device.displayName}: Can't set parameter ${parameterNumber}, Incomplete parameter list supplied... syntax: setParameter(parameterNumber,size,value), received: setParameter(${parameterNumber}, ${size}, ${value})."
     } else {
@@ -1268,7 +1427,7 @@ void setParameter(Map params =  [ parameterNumber: null , value: null ] ){
 		if (report)
 		{
 			if ((report.scaledConfigurationValue) == (params.value as BigInteger)) {
-				if (txtEnable) log.info "Device ${device.displayName}: Successfully set parameter #: ${params.parameterNumber} to value ${params.value}."
+				log.info "Device ${device.displayName}: Successfully set parameter #: ${params.parameterNumber} to value ${params.value}."
 			} else {
 				log.warn "Device ${device.displayName}: Failed to set parameter #: ${params.parameterNumber} to value ${params.value}. Value of parameter is set to ${report.scaledConfigurationValu} instead."
 			}
