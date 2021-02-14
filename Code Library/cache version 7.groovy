@@ -50,7 +50,7 @@ metadata {
 		
 			ConcurrentHashMap inputs = getInputControlsForDevice()
 		
-			List<Integer> keyset = inputs.keySet().collect{ it as Integer}
+			List<Integer> keyset = inputs?.keySet().collect{ it as Integer}
 
 			keyset?.sort().each{ input inputs.get(it) }
         }
@@ -60,7 +60,15 @@ metadata {
 
 void clearState()
 {
-state.clear()
+	state.clear()
+	
+	// Clean out any old settings names!
+	ConcurrentHashMap inputs = getInputControlsForDevice()
+	List<String> allSettingNames = ["logEnable", "txtEnable", "superviseEnable"] + inputs.values().collect{it.name as String } 
+	settings.each{k, v -> 
+		if (allSettingNames.contains( k as String)) return
+		device.removeSetting(k as String) 
+		}
 }
 void deleteChildDevices()
 {
@@ -309,7 +317,136 @@ void zwaveEvent(hubitat.zwave.commands.meterv5.MeterReport cmd, Short ep = null 
 		log.warn "Device ${targetDevice.displayName}: Received unexpected meter type for ${targetDevice.displayName}. Only type '1' (Electric Meter) is supported. Received type: ${cmd.meterType}"
 	}
 }
+//////////////////////////////////////////////////////////////////////
+//////        Handle  Multilevel Sensor       ///////
+//////////////////////////////////////////////////////////////////////
 
+
+void zwaveEvent(hubitat.zwave.commands.sensormultilevelv11.SensorMultilevelReport cmd, Short ep = null )
+{
+	def targetDevice
+	if (ep) {
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Short) == ep}
+	} else { targetDevice = device }
+	
+	log.warn "Device ${device.displayName}: WARNING. MultiLevel Report code is currently incomplete. Sensor Multilevel Report is: " + cmd
+	switch (cmd.sensorType as Integer)
+	{
+		case 1: // temperature
+			String tempUnits = [0:"F", 1:"C"].get(cmd.scale as Integer)
+			targetDevice.sendEvent(name: "temperature", value: cmd.scaledMeterValue, unit: tempUnits)
+			break
+		case 3: // Illuminance
+			String lightUnits = [0:"%", 1:"Lux"].get(cmd.scale as Integer)
+			targetDevice.sendEvent(name: "illuminance", value: cmd.scaledMeterValue, unit: lightUnits)
+			break	
+		case 4: // Power
+			String powerUnits = [0:"Watts", 1:"BTU/h"].get(cmd.scale as Integer)
+			targetDevice.sendEvent(name: "power", value: cmd.scaledMeterValue, unit: powerUnits)
+			break		
+		case 5: // Humidity
+			String humidUnits = [0:"%", 1:"g/m3"].get(cmd.scale as Integer)
+			targetDevice.sendEvent(name: "humidity", value: cmd.scaledMeterValue, unit: humidUnits)
+			break		
+		case 15: // voltage
+			String voltUnits = [0:"V", 1:"mV"].get(cmd.scale as Integer)
+			targetDevice.sendEvent(name: "voltage", value: cmd.scaledMeterValue, unit: humidUnits)
+			break
+		case 16: // Current
+			String currentUnits = [0:"A", 1:"mA"].get(cmd.scale as Integer)
+			targetDevice.sendEvent(name: "amperage", value: cmd.scaledMeterValue, unit: currentUnits)
+			break				
+		default :
+			log.warn "Device ${targetDevice.displayName}: Received an unsupported SensorMultilevelReport: ${cmd}."
+			break
+	}
+}
+
+//////////////////////////////////////////////////////////////////////
+//////        Handle Notifications        ///////
+//////////////////////////////////////////////////////////////////////
+
+void getSupportedNotificationEvents()
+{
+	List<hubitat.zwave.Command> report = getCachedNotificationSupportedReport(ep)		
+	
+	if (ep) log.warn "Device ${device.displayName}: Endpoint handling in report type NotificationSupportedReport is incomplete! Alert developer."
+
+	if (logEnable) log.debug "Device ${device.displayName}: Received Notification Supported Report: " + cmd 
+	List<hubitat.zwave.Command> cmds=[]
+		
+	if (report.smoke)			cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 1)) // Smoke
+	if (report.co)				cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 2)) // CO Alarm
+	if (report.co2)				cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 3)) // CO2 Alarm
+	if (report.heat)			cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 4)) // Heat Alarm
+	if (report.water)			cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 5)) // Water
+	if (report.accessControl) 	cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 6)) // Access Control
+	if (report.burglar)			cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 7)) // Burglar
+	if (report.powerManagement)	cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 8)) // Power Management
+	if (report.system)			cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 9)) // System
+	if (report.emergency)		cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 10)) // Emergency
+	if (report.clock)			cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 11)) // Clock
+	if (report.appliance)		cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 12)) // Appliance
+	if (report.homeHealth)		cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 13)) // Home Health
+	if (report.siren)			cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 14)) // Siren
+	if (report.waterValve)		cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 15)) // Water Valve
+	if (report.weatherAlarm)	cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 16)) // Weather Alarm
+	if (report.irrigation)		cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 17)) // Irrigation
+	if (report.gasAlarm)		cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 18)) // Gas Alarm
+	if (report.pestControl)		cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 19)) // Pest Control
+	if (report.lightSensor)		cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 20)) // Light Sensor
+	if (report.waterQuality)	cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 21)) // Water Quality
+	if (report.homeMonitoring)	cmds << secure(zwave.notificationV8.eventSupportedGet(notificationType: 22)) // Home Monitoring	
+
+	if (cmds) sendToDevice(cmds)
+}
+
+void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd, ep = null)
+{
+	def targetDevice
+	if (ep) {
+		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Short) == ep}
+	} else { targetDevice = device }		
+	
+	List events =
+		[ 	1:[ // Smoke
+				0:[[name:"smoke" , value:"clear", descriptionText:"Smoke detector status Idle."]], 
+				1:[[name:"smoke" , value:"detected", descriptionText:"Smoke detected (location provided)."]], 
+				2:[[name:"smoke" , value:"detected", descriptionText:"Smoke detected."]],
+				254:[]
+				], // Smoke
+			5:[ // Water
+				0:[[name:"water" , value:"dry", descriptionText:"Water Alarm Notification, Status Dry."]], 
+				1:[[name:"water" , value:"wet", descriptionText:"Water leak detected (location provided)."]], 
+				2:[[name:"water" , value:"wet", descriptionText:"Water leak detected."]], 
+				254:[]
+				], // Water
+			6:[ // Access Control
+				0:[], 
+				1:[[name:"lock" , value:"locked", descriptionText:"Manual lock operation"]], 
+				2:[[name:"lock" , value:"unlocked", descriptionText:"Manual unlock operation"]], 
+				3:[[name:"lock" , value:"locked", descriptionText:"RF lock operation"]], 
+				4:[[name:"lock" , value:"unlocked", descriptionText:"RF unlock operation"]], 
+				5:[[name:"lock" , value:"locked", descriptionText:"Keypad lock operation"]], 
+				6:[[name:"lock" , value:"unlocked", descriptionText:"Keypad unlock operation"]], 
+				11:[[name:"lock" , value:"unknown", descriptionText:"Lock jammed"]], 				
+				254:[[name:"lock" , value:"unknown", descriptionText:"Lock in unknown state"]]
+				], // Locks
+			7:[
+				0:[[name:"tamper" , value:"clear", descriptionText:"Tamper state cleared."],[name:"motion" , value:"inactive", descriptionText:"Motion Inactive."] ], 
+				3:[[name:"tamper" , value:"detected", descriptionText:""]], 
+				4:[[name:"tamper" , value:"detected", descriptionText:"Tampering, invalid code."]], 
+				7:[[name:"motion" , value:"active", descriptionText:"Motion detected (location provided)."]],
+				8:[[name:"motion" , value:"active", descriptionText:"Motion detected."]],
+				9:[[name:"tamper" , value:"detected", descriptionText:"Tampering (Product Moved)."]],
+				254:[]
+				], // Motion
+			
+		].get(cmd.notificationType as Integer)?.get(cmd.event as Integer)
+	
+
+	events?.each{ targetDevice.sendEvent(it) }
+}
 
 //////////////////////////////////////////////////////////////////////
 //////        Report Pre-Caching Library Functions            ///////
@@ -1172,20 +1309,31 @@ should be called AFTER retrieving the device's firmware version using getFirmwar
 Map getInputControlsForDevice()
 {
 	ConcurrentHashMap inputControls = OpenSmartHouseRecords.get(firmwareKey(), new ConcurrentHashMap())
+	log.debug "inputControls are: " + inputControls
 	if (inputControls?.size() > 0) 
 	{
-		if (state.parameterInputs.is( null )) state.parameterInputs = inputControls
-	} else if (state.parameterInputs) {
-		state.parameterInputs.each{ k, v -> inputControls.put( k as Integer, v) }
+		if (!state.parameterInputs?.containsKey(firmwareKey()))
+		{
+			log.debug "state.parameterInputs missing the firmware key. Recreating"
+			state.remove("parameterInputs")
+			state.parameterInputs = [(firmwareKey()):inputControls]
+		} else { log.debug "already storing state for inputControls" }
+		
+	} else if (state.parameterInputs?.containsKey(firmwareKey())) {
+
+		log.debug "State contains the key. loading inputs from state"
+			state.parameterInputs.get(firmwareKey()).each{ k, v -> inputControls.put( k as Integer, v) }
+		
 		if (logEnable) log.debug "Device ${device.displayName}: Loaded Input Controls from saved state data. Controls are ${inputControls}"
 	} else {
 		if (logEnable) log.debug "Retrieving input control date from opensmarthouse.org for device ${device.displayName}."
 		try {
 			List parameterData = getOpenSmartHouseData()
 			inputControls = createInputControls(parameterData)
-			if (inputControls) state.parameterInputs = inputControls	
-		} catch (Exception ex) {
-			log.warn "Device ${device.displayName}: An Error occurred when attempting to get input controls. Error: ${ex}."
+			if (inputControls) state.parameterInputs = [(firmwareKey()):inputControls]
+		} catch (ex) {
+			log.warn "Device ${device.displayName}: An Error occurred when attempting to get input controls. Error: ${ex}. Stack trace is: ${getStackTrace(ex)}. Exception message is ${getExceptionMessageWithLine(ex)}"
+
 			return null
 		}
 	}
@@ -1319,7 +1467,7 @@ Map<Short, BigInteger> getParameterValuesFromDevice(Map options = [useCache: tru
 			{ k, v ->
 				sendToDevice(secure(zwave.configurationV1.configurationGet(parameterNumber: k as Short)))
 				report = myReportQueue("7006").poll(10, TimeUnit.SECONDS)
-				
+				if (! report) return
 				// Single-byte return values > 127 get turned into negative numbers when using scaledConfigurationValue, so don't use cmd.scaledConfiguraiton if cmd.size == 1!
 				BigInteger newValue = (report.size == 1) ? report.configurationValue[0] : report.scaledConfigurationValue			
 				if (newValue < 0) log.warn "Device ${device.displayName}: Negative configuration value reported for configuration paramater ${k}."
@@ -1327,7 +1475,7 @@ Map<Short, BigInteger> getParameterValuesFromDevice(Map options = [useCache: tru
 				if (report) parameterValues.put(report.parameterNumber, newValue )
 			}
 	}
-	if (logEnable) log.debug "Device ${device.displayName}: Map of Parameter Values reorted by device is: ${ parameterValues}."
+	if (logEnable) log.debug "Device ${device.displayName}: Map of Parameter Values reported by device is: ${ parameterValues}."
 	return parameterValues
 }
 
@@ -1361,12 +1509,20 @@ Map<Short, BigInteger> getParameterValuesFromInputControls()
 	Map<Short, BigInteger> settingValues = [:]
 	
 	inputs.each { PKey , PData -> 
+	log.debug "Input is: ${PKey}:${PData}."
+	log.debug "settings are: " + settings
+	
 			BigInteger newValue = 0
+			log.debug "settings.get(PData.name as String) is ${settings.get(PData.name as String)}."
 			// if the setting returns an array, then it is a bitmap control, and add together the values.
-			if (settings[PData.name] instanceof ArrayList) {
-				settings[PData.name].each{ newValue += it as BigInteger }
+			if (settings.get(PData.name as String) instanceof ArrayList) {
+				def test = settings.get(PData.name as String)
+				log.debug "ArrayList Variable ${PData.name} is of class ${test.class} and contents ${test}."
+				settings.get(PData.name as String).each{ newValue += it as BigInteger }
 			} else  {   
-				newValue = settings[PData.name] as BigInteger  
+				def test = settings.get(PData.name as String)
+				log.debug "Variable ${PData.name} is of class ${test.class}"
+				newValue = settings.get(PData.name as String) as BigInteger  
 			}
 			settingValues.put(PKey as Short, newValue)
 		}
