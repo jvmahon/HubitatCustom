@@ -10,8 +10,9 @@ metadata {
 		capability "Refresh"
 		capability "Switch"
 		capability "SwitchLevel"
-		// capability "ChangeLevel"
-        capability "Lock"
+		capability "ChangeLevel"
+        // capability "Lock"
+		// capability "WindowShade"
 		
         attribute "buttoonTripleTapped", "number"	
 		attribute "buttonFourTaps", "number"	
@@ -67,15 +68,25 @@ void clearLeftoverSettings()
 		}
 }
 
+void clearLeftoverStates()
+{
+	// Clean out any old state variables left behind by other driver versions!
+	List<String> allowedStateVariables = ["pendingChanges", "parameterInputs", "deviceInformation"] 
+	state.each{k, v -> 
+		if (allowedStateVariables.contains( k as String)) return
+		state.remove(k as String) 
+		}
+}
+
 void installed() { 
-	state.clear()
+	clearLeftoverStates()
 	clearLeftoverSettings()
 }
 
 void configure() { 
 	if (txtEnable) log.info "Device ${device.displayName}: Executing configure routine."
 	if (txtEnable) log.info "Device ${device.displayName}: clearing old state data."
-	state.clear()
+	clearLeftoverStates()
 	clearLeftoverSettings()
 	if (txtEnable) log.info "Device ${device.displayName}: Creating child devices (if supported)."
 	deleteUnwantedChildDevices()
@@ -101,16 +112,16 @@ void initialize( )
 
 void refresh(Map params = [cd: null ])
 {
-	def targetDevice = (params.cd ? params.cd : device)
+	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ? params.cd : device)
 	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
 	if (implementsZwaveClass(0x26, ep)) { // Multilevel  type device
-		sendToDevice(secure(zwave.switchMultilevelV4.switchMultilevelGet(), ep) )
+		sendToDevice(zwave.switchMultilevelV4.switchMultilevelGet(), ep)
 	} else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
-		sendToDevice(secure(zwave.switchBinaryV1.switchBinaryGet(), ep))
+		sendToDevice(zwave.switchBinaryV1.switchBinaryGet(), ep)
 	} else { // Basic Set Type device
 		log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
-		sendToDevice(secure(zwave.basicV2.basicGet(), ep))
+		sendToDevice(zwave.basicV2.basicGet(), ep)
 	}
 	
 	meterRefresh( ep )
@@ -188,10 +199,7 @@ void meterRefresh ( Short ep = null )
 	if (!implementsZwaveClass(0x32, ep) ) return
 	log.debug "Meter types supported are: " + getElectricMeterScalesSupportedMap( ep )
 	
-	def targetDevice
-	if (ep) {
-		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Short) == ep}
-	} else { targetDevice = device }
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
 
 	if (implementsZwaveClass(0x32, ep) < 1)
 	{
@@ -204,7 +212,7 @@ void meterRefresh ( Short ep = null )
 	if (implementsZwaveClass(0x32, ep) == 1)
 	{
 		if (logEnable) log.debug "Performing a Version 1 Meter Get for device ${targetDevice.displayName}."
-		sendToDevice(secure(zwave.meterV1.meterGet(), ep))
+		sendToDevice(zwave.meterV1.meterGet(), ep)
 	} else {
 		Map<String, Boolean> metersSupported = getElectricMeterScalesSupportedMap( ep )
 		
@@ -225,10 +233,7 @@ void meterRefresh ( Short ep = null )
 
 Map<String, Boolean> getElectricMeterScalesSupportedMap(Short ep = null )
 {
-	def targetDevice
-	if (ep) {
-		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Short) == ep}
-	} else { targetDevice = device }	
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
 
 	hubitat.zwave.Command report = getCachedMeterSupportedReport( ep )
 	
@@ -263,10 +268,7 @@ Map<String, Boolean> getElectricMeterScalesSupportedMap(Short ep = null )
 
 void zwaveEvent(hubitat.zwave.commands.meterv5.MeterReport cmd, Short ep = null )
 {
-	def targetDevice
-	if (ep) {
-		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Short) == ep}
-	} else { targetDevice = device }	
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
 	
 	if (logEnable && cmd.hasProperty("rateType") && (cmd.rateType != 1)) log.warn "Device ${targetDevice.displayName}: Unexpected Meter rateType received. Value is: ${cmd.rateType}."
 	
@@ -335,10 +337,7 @@ void zwaveEvent(hubitat.zwave.commands.meterv5.MeterReport cmd, Short ep = null 
 
 void zwaveEvent(hubitat.zwave.commands.sensormultilevelv11.SensorMultilevelReport cmd, Short ep = null )
 {
-	def targetDevice
-	if (ep) {
-		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Short) == ep}
-	} else { targetDevice = device }
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
 	
 	log.warn "Device ${device.displayName}: WARNING. MultiLevel Report code is currently incomplete. Sensor Multilevel Report is: " + cmd
 	switch (cmd.sensorType as Integer)
@@ -412,12 +411,9 @@ void getSupportedNotificationEvents()
 	if (cmds) sendToDevice(cmds)
 }
 
-void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd, ep = null)
+void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd, ep = null )
 {
-	def targetDevice
-	if (ep) {
-		targetDevice = getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Short) == ep}
-	} else { targetDevice = device }		
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
 	
 	List events =
 		[ 	1:[ // Smoke
@@ -616,7 +612,7 @@ hubitat.zwave.Command  getCachedVersionCommandClassReport(Short requestedCommand
 	if (cmd) { 
 		return cmd
 	} else {
-		sendToDevice(secure(zwave.versionV1.versionCommandClassGet(requestedCommandClass: requestedCommandClass )))
+		sendToDevice(zwave.versionV1.versionCommandClassGet(requestedCommandClass: requestedCommandClass ))
 		cmd = myReportQueue("8614").poll(10, TimeUnit.SECONDS)
 		if(cmd.is( null ) ) {log.warn "Device ${device.displayName}: failed to retrieve a requested command class ${requestedCommandClass}."; return null }
 		ClassReports.put(cmd.requestedCommandClass, cmd)
@@ -655,7 +651,7 @@ hubitat.zwave.Command   getReportCachedByNetworkId(Map options = [:], hubitat.zw
 		Map transferredData;
 		while( transferredData.is (null ) )
 		{
-			sendToDevice(secure(getCmd, ep))
+			sendToDevice(getCmd, ep)
 			transferredData = myReportQueue(reportClass).poll(10, TimeUnit.SECONDS)
 		}
 		cmd =  transferredData.report
@@ -693,7 +689,7 @@ hubitat.zwave.Command   getReportCachedByProductId(Map options = [:], hubitat.zw
 		// if (logEnable) log.debug "Device ${device.displayName}: In function getReportCachedByProductId, getting report using command ${getCmd} for endpoint ${ep}."
 	} else {
 		// if (logEnable) log.debug "Device ${device.displayName}: sending to device a command : ${getCmd} to get report ${reportClass} for subIndex ${subIndex}."
-		sendToDevice(secure(getCmd, ep))
+		sendToDevice(getCmd, ep)
 		Map transferredData = myReportQueue(reportClass).poll(10, TimeUnit.SECONDS)
 		// if (logEnable) log.debug "Device ${device.displayName}: Transferred data for report ${getCmd} is: " + transferredData
 		cmd =  transferredData.report
@@ -732,10 +728,12 @@ void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelSuppor
 void zwaveEvent(hubitat.zwave.commands.sensormultilevelv11.SensorMultilevelSupportedSensorReport  cmd, ep = null ) 	{ transferReport(cmd, ep) }		
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd, ep = null )  									{ transferReport(cmd, ep) }
 Boolean transferReport(cmd, ep)
-{ 
+{ 	
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
+
 	Boolean transferredReport = myReportQueue(cmd.CMD).offer([report:cmd, endPoint:ep])
 	if (transferredReport) { if (logEnable) log.debug "Successfully transferred version report to waiting receiver." }
-	else { log.warn "Device ${device.displayName} Failed to transfer report ${cmd}" }
+	else { log.warn "Device ${targetDevice.displayName} Failed to transfer report ${cmd}" }
 	return transferredReport
 }
 
@@ -790,8 +788,11 @@ Integer implementsZwaveClass(Short commandClass, Short ep = null )
 		
 		if (supportsEndpoints && (ep <= numberOfEndPoints))
 		{
-		report = getCachedMultiChannelCapabilityReport(ep)
-		if (report.commandClass.contains(commandClass)) return getCachedVersionCommandClassReport(commandClass)?.commandClassVersion
+			if (getCachedMultiChannelCapabilityReport(ep)?.commandClass.contains(commandClass)) {
+				return getCachedVersionCommandClassReport(commandClass)?.commandClassVersion
+			} else {
+				return null
+			}
 		} else {
 			log.warn "Device ${device.displayName}: called function implementsZwaveClass(commandClass = ${commandClass}, ep = ${ep}). Maximum endpoints supported by this device is: ${numberOfEndPoints ? numberOfEndPoints : 0}" 
 			return null
@@ -848,34 +849,37 @@ def supervise(hubitat.zwave.Command command)
 
 // This handles a supervised message (a "get") received from the Z-Wave device //
 void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd, Short ep = null ) {
-    if (logEnable) log.debug "Received a SupervisionGet message from ${device.displayName}. The SupervisionGet message is: ${cmd}"
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
+	
+    if (logEnable) log.debug "Received a SupervisionGet message from ${targetDevice.displayName}. The SupervisionGet message is: ${cmd}"
 
     hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap, defaultParseMap)
 	
     if (encapsulatedCommand) {
         zwaveEvent(encapsulatedCommand, ep)
     }
-    sendToDevice(secure((new hubitat.zwave.commands.supervisionv1.SupervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0)), ep))
+    sendToDevice((new hubitat.zwave.commands.supervisionv1.SupervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0)), ep)
 }
 
-void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionReport cmd) {
-
+void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionReport cmd, ep = null ) {
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
+	
 	hubitat.zwave.Command whatWasSent = supervisionSentCommands?.get(device.getDeviceNetworkId() as String)?.get(cmd.sessionID)
 
 	switch (cmd.status)
 	{
 		case 0x00:
-			log.warn "Device ${device.displayName}: A Supervised command sent to device ${device.displayName} is not supported. Command was: ${whatWasSent}. Re-sending without supervision."
+			log.warn "Device ${targetDevice.displayName}: Z-Wave Command supervision not supported for: ${whatWasSent}. Re-sending without supervision."
 			markSupervisionNotSupported(whatWasSent)
-			sendToDevice(secure(whatWasSent))
+			sendToDevice(whatWasSent, ep )
 			break
 		case 0x01:
-			if (txtEnable) log.info "Device ${device.displayName}: Still processing command: ${whatWasSent}."
+			if (txtEnable) log.info "Device ${targetDevice.displayName}: Still processing command: ${whatWasSent}."
 		case 0x02:
-			log.warn "Device ${device.displayName}: A Supervised command sent to device ${device.displayName} failed. The command that failed was: ${whatWasSent}."
+			log.warn "Device ${targetDevice.displayName}: Z-Wave supervised command reported failure. Failed command: ${whatWasSent}."
 			break
 		case 0xFF:
-			if (txtEnable) log.info "Device ${device.displayName}: Successfully processed command ${whatWasSent}."
+			if (txtEnable) log.info "Device ${targetDevice.displayName}: Device successfully processed supervised command ${whatWasSent}."
 			break
 	}
 }
@@ -960,7 +964,13 @@ void parse(String description) {
 
 ////    Z-Wave Message Sending to Hub  ////
 void sendToDevice(List<hubitat.zwave.Command> cmds) { sendHubCommand(new hubitat.device.HubMultiAction(commands(cmds), hubitat.device.Protocol.ZWAVE)) }
-void sendToDevice(hubitat.zwave.Command cmd) { sendHubCommand(new hubitat.device.HubAction(cmd, hubitat.device.Protocol.ZWAVE)) }
+
+void sendToDevice(hubitat.zwave.Command cmd, ep = null ) { sendHubCommand(new hubitat.device.HubAction(secure(cmd, ep), hubitat.device.Protocol.ZWAVE)) }
+
+void sendSupervised(hubitat.zwave.Command cmd, ep = null ) { 
+		sendHubCommand(new hubitat.device.HubAction( secure(supervise(cmd), ep), hubitat.device.Protocol.ZWAVE)) 
+	}
+	
 void sendToDevice(String cmd) { sendHubCommand(new hubitat.device.HubAction(cmd, hubitat.device.Protocol.ZWAVE)) }
 
 List<String> commands(List<hubitat.zwave.Command> cmds, Long delay=200) { return delayBetween(cmds.collect{ it }, delay) }
@@ -995,73 +1005,141 @@ Short getEndpoint(com.hubitat.app.DeviceWrapper device)
 	return device.deviceNetworkId.split("-ep")[-1] as Short
 }
 
-void componentRefresh(cd){
+void componentRefresh(com.hubitat.app.DeviceWrapper cd){
     if (logEnable) log.info "received refresh request from component ${cd.displayName}"
 	refresh(cd:cd)
 }
 
-void componentOn(cd){
+void componentOn(com.hubitat.app.DeviceWrapper cd){
     log.debug "received componentOn request from ${cd.displayName}"
     // getChildDevice(cd.deviceNetworkId).parse([[name:"switch", value:"on", descriptionText:"${cd.displayName} was turned on"]])
 	on(cd:cd)
 }
 
-void componentOff(cd){
+void componentOff(com.hubitat.app.DeviceWrapper cd){
     log.debug "received componentOff request from ${cd.displayName}"
     // getChildDevice(cd.deviceNetworkId).parse([[name:"switch", value:"off", descriptionText:"${cd.displayName} was turned off"]])
 	off(cd:cd)
 }
 
-void componentSetLevel(cd,level,transitionTime = null) {
+void componentSetLevel(com.hubitat.app.DeviceWrapper d,level,transitionTime = null) {
     if (logEnable) log.info "received setLevel(${level}, ${transitionTime}) request from ${cd.displayName}"
     // getChildDevice(cd.deviceNetworkId).parse([[name:"level", value:level, descriptionText:"${cd.displayName} level was set to ${level}%", unit: "%"]])
 	setLevel(level:level, duration:transitionTime, cd:cd)
 }
 
-void componentStartLevelChange(cd, direction) {
+void componentStartLevelChange(com.hubitat.app.DeviceWrapper cd, direction) {
     if (logEnable) log.info "received startLevelChange(${direction}) request from ${cd.displayName}"
 	startLevelChange(direction:direction, cd:cd)
 }
 
-void componentStopLevelChange(cd) {
+void componentStopLevelChange(com.hubitat.app.DeviceWrapper cd) {
     if (logEnable) log.info "received stopLevelChange request from ${cd.displayName}"
 	stopLevelChange(cd:cd)
 }
 
-void componentSetSpeed(cd, speed) {
+void componentSetSpeed(com.hubitat.app.DeviceWrapper cd, speed) {
     if (logEnable) log.info "received setSpeed(${speed}) request from ${cd.displayName}"
 	log.warn "componentSetSpeed not yet implemented in driver!"
     // getChildDevice(cd.deviceNetworkId).parse([[name:"level", value:level, descriptionText:"${cd.displayName} level was set to ${level}%", unit: "%"]])
 	setSpeed(speed:speed, cd:cd)
 }
 
-void setSpeed(Map params = [speed: null , cd: null ], speed)
+void setSpeed(Map params = [speed: null , cd: null ], speed, com.hubitat.app.DeviceWrapper cd = null )
 {
-	def targetDevice = (cd ? cd : device)
+	com.hubitat.app.DeviceWrapper targetDevice = (cd ? cd : device)
 	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	log.warn "setSpeed function not implemented yet!"
 	log.debug "Device ${targetDevice.displayName}: called setSpeed. Child device: ${ (cd) ? true : false }"
 }
 
-void setPosition(Map params = [position: null , cd: null ], position )
+// void setPosition(position) { setPosition(position:position, cd: null )}
+void setPosition(Map params = [position: null , cd: null ], position)
 {
-	def targetDevice = (cd ? cd : device)
+log.debug "setPosition parameters: $params, $position, $cd"
+	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ?: cd ?: device)
 	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
-	log.warn "setPosition function not implemented yet!"
-	log.debug "Device ${targetDevice.displayName}: called setPosition. Child device: ${ (cd) ? true : false }"
+	
+	Integer newPosition = Math.min(Math.max((params.position ?: position) as Integer, 0), 99) as Integer
+	if (txtEnable) log.info "Device ${targetDevice.displayName}: Setting Position to ${newPosition}."
+	
+	if (newPosition == 0) 	{ close(cd:cd)}
+	else { open(cd:cd, position:position)}
 
 }
 
-void close( cd = null ) {
-	def targetDevice = (cd ? cd : device)
+
+void close(Map params = [cd: null ]) {
+	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ?: device)
 	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
-	log.warn "Device ${targetDevice.displayName}: called close(). Function not implemented."
+	
+	if ((targetDevice.getDataValue("position") as Integer) == 0)
+	{
+		log.debug "No change in position in function close(). Returning without doing anything!"
+		return
+	}
+	
+	if (txtEnable) log.info "Device ${targetDevice.displayName}: closing window shade."
+
+	if (implementsZwaveClass(0x26, ep)) { // Multilevel  type device
+		sendSupervised(zwave.switchMultilevelV4.switchMultilevelSet(value: 0), ep)	
+	} else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
+		sendSupervised(zwave.switchBinaryV1.switchBinarySet(switchValue: 0 ), ep)
+	} else if (implementsZwaveClass(0x20, ep)) { // Basic Set Type device
+		log.warn "Device ${targetDevice.displayName}: Using Basic Set to close window shade device. A more specific command class should be used!"
+		sendSupervised(zwave.basicV2.basicSet(value: 0 ), ep)
+	} else {
+		log.debug "Device ${targetDevice.displayName}: Error in function lose(). Device does not implement a supported class"
+		return
+	}
+
+	targetDevice.sendEvent(name: "windowShade", value: "closing", descriptionText: "Window Shade ${targetDevice.displayName} closing", type: "digital")
+	targetDevice.sendEvent(name: "windowShade", value: "closed", descriptionText: "Window Shade ${targetDevice.displayName} closed", type: "digital")
+	log.debug "In function close(), there should be a wait between the closing and closed events. Currently, they are just sent one after the other to trigger both closing and close rules"
+	targetDevice.sendEvent(name: "position", value: 0, descriptionText: "Window Shade ${targetDevice.displayName} position", unit:"%", type: "digital")
+
 }
 
-void open( cd = null ) {
-	def targetDevice = (cd ? cd : device)
-	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
-	log.warn "Device ${targetDevice.displayName}: called close(). Function not implemented."
+void open(Map params = [cd: null , position: 100 ])
+{
+	log.debug "In function open(Map ...), map values are: $params"
+	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ?: device)
+	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
+	
+	Integer position = Math.min(Math.max((params.position as Integer), 1), 100)
+	if ((targetDevice.getDataValue("position") as Integer) == position)
+	{
+		log.debug "No change in position in function open(). Returning without doing anything!"
+		return
+	}	
+	Map event
+	if (implementsZwaveClass(0x26, ep)) // Multilevel  type device
+	{ 
+		sendSupervised(zwave.switchMultilevelV4.switchMultilevelSet(value: Math.min(position, 99)), ep)
+		event = [name: "position", value: position, descriptionText: "Device ${targetDevice.displayName} set to position ${position}%", type: "digital"]
+	} 
+	else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
+		sendSupervised(zwave.switchBinaryV1.switchBinarySet(switchValue: 255 ), ep)
+		position = 100
+		event = [name: "position", value: 100, descriptionText: "Device ${targetDevice.displayName} set to open position.", type: "digital"]
+	}
+	else if (implementsZwaveClass(0x20, ep)) { // Basic Set Type device
+		log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
+		sendToDevice(zwave.basicV2.basicSet(value: 0xFF ), ep)
+		position = 100
+		event = [name: "position", value: 100, descriptionText: "Device ${targetDevice.displayName} set to open position.", type: "digital"]
+
+	} else  {
+		log.debug "Error in function on() - device ${targetDevice.displayName} does not implement a supported class"
+	}
+
+	targetDevice.sendEvent(name: "windowShade", value: "opening", 
+				descriptionText: "Window Shade ${targetDevice.displayName} opening", type: "digital")
+	targetDevice.sendEvent(name: "windowShade", value: ((position == 100) ? "open" : "partially open"), 
+				descriptionText: "Window Shade ${targetDevice.displayName} ${((position == 100) ? "open" : "partially open")}", type: "digital")
+	log.debug "In function open(), there should be a wait between the opening and open events. Currently, they are just sent one after the other to trigger both closing and close rules"
+	targetDevice.sendEvent(name: "position", value: position, descriptionText: "Window Shade ${targetDevice.displayName} position", unit:"%", type: "digital")
+
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -1077,22 +1155,23 @@ void zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd)
 }
 
 void batteryGet() {
-	sendToDevice(secure(zwave.batteryV1.batteryGet()))
+	sendToDevice(zwave.batteryV1.batteryGet())
 }
 //////////////////////////////////////////////////////////////////////
 //////        Handle Basic Reports and Device Functions        ///////
 ////////////////////////////////////////////////////////////////////// 
-def getTargetDeviceByEndPoint(Short ep = null )
+com.hubitat.app.DeviceWrapper getTargetDeviceByEndPoint(Short ep = null )
 {
 	if (ep) { return getChildDevices().find{ (it.deviceNetworkId.split("-ep")[-1] as Short) == (ep as Short)}
 	} else { return device }
 }
 
+
 void zwaveEvent(hubitat.zwave.commands.switchbinaryv2.SwitchBinaryReport cmd, ep = null)
 {
-	if (logEnable) log.debug "Device ${device.displayName}: Received a SwitchBinaryReport ${cmd} for endpoint ${ep}."
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
 
-	def targetDevice = getTargetDeviceByEndPoint(ep)
+	if (logEnable) log.debug "Device ${targetDevice.displayName}: Received a SwitchBinaryReport ${cmd}."
 
 	if (! targetDevice.hasAttribute("switch")) log.warn "For device ${targetDevice.displayName}, received a Switch Binary Report for a device that does not have a switch!"
 	
@@ -1108,73 +1187,77 @@ void zwaveEvent(hubitat.zwave.commands.switchbinaryv2.SwitchBinaryReport cmd, ep
 	}
 }
 
-
-
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelReport cmd, Short ep = null)
 {
-	if (logEnable) log.debug "Device ${device.displayName}: Received a SwitchMultilevelReport ${cmd} for endpoint ${ep}."
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
 
-	def targetDevice = getTargetDeviceByEndPoint(ep)
-	
+	if (logEnable) log.debug "Device ${targetDevice.displayName}: Received a SwitchMultilevelReport ${cmd}."
+
 	if (targetDevice.hasAttribute("position")) 
 	{ 
 		targetDevice.sendEvent( name: "position", value: (cmd.value == 99 ? 100 : cmd.value) , unit: "%", 
 				descriptionText: "Device ${targetDevice.displayName} position set to ${cmd.value}%", type: "physical" )
-		return 
 	}
-	
-	Boolean hasSwitch = targetDevice.hasAttribute("switch")
-	Boolean isDimmer = targetDevice.hasAttribute("level")
-
-	Boolean turnedOn = false
-	Short newLevel = 0
-
-	if ((! (cmd.duration.is( null ) || cmd.targetValue.is( null ) )) && ((cmd.duration as Short) > (0 as Short))) //  Consider duration and target, but only when both are present and in transition with duration > 0 
+	if (targetDevice.hasAttribute("windowShade"))
 	{
-		turnedOn = (cmd.targetValue as Short) != (0 as Short)
-		newLevel = (cmd.targetValue as Short)
-	} else {
-		turnedOn = (cmd.value as Short) > (0 as Short)
-		newLevel = cmd.value as Short
-	}
-	
-	String priorSwitchState = targetDevice.currentValue("switch")
-	String newSwitchState = (turnedOn ? "on" : "off")
-	Short priorLevel = targetDevice.currentValue("level")
-	Short targetLevel
-
-	if (newLevel == 99)
-	{
-		if ( priorLevel == 100) targetLevel = 100
-		if ( priorLevel == 99) targetLevel = 99
-	} else targetLevel = newLevel
-	
-    if (isDimmer && (priorSwitchState != newSwitchState))
-	{
-		targetDevice.sendEvent(	name: "switch", value: newSwitchState, 
-						descriptionText: "Device ${targetDevice.displayName} set to ${newSwitchState}.", 
-						type: "physical" )
-		if (txtEnable) log.info "Device ${targetDevice.displayName} set to ${newSwitchState}."
-	}
-	if (hasDimmer && turnedOn) // If it was turned off, that would be handle in the "isDimmer" block above.
-	{
-		// Don't send the event if the level doesn't change except if transitioning from off to on, always send!
-		if ((priorLevel != targetLevel) || (priorSwitchState != newSwitchState))
+		String positionDescription
+		switch (cmd.value as Integer)
 		{
-			targetDevice.sendEvent( 	name: "level", value: targetLevel, 
-					descriptionText: "Device ${targetDevice.displayName} level set to ${targetLevel}%", 
-					type: "physical" )
-			if (txtEnable) log.info "Device ${targetDevice.displayName} level set to ${targetLevel}%"		
+			case 0: 
+				positionDescription = "closed"
+				break
+			case 99: 
+				positionDescription = "open"
+				break
+			default : 
+				positionDescription = "partially open"
+				break
+		}
+		targetDevice.sendEvent( name: "windowShade", value: positionDescription,  
+				descriptionText: "Window Shade ${targetDevice.displayName} position set.", type: "physical" )	
+	}
+	if (targetDevice.hasAttribute("level") || targetDevice.hasAttribute("switch") ) // Switch or a fan
+	{
+		Integer targetLevel = 0
+
+		if ((! cmd.targetValue.is( null ) ) && ((cmd.duration as Short) > (0 as Short))) //  Consider duration and target, but only when both are present and in transition with duration > 0 
+		{
+			targetLevel = cmd.targetValue
+		} else {
+			targetLevel = cmd.value
+		}
+
+		String priorSwitchState = targetDevice.currentValue("switch")
+		String newSwitchState = ((targetLevel != 0) ? "on" : "off")
+		Short priorLevel = targetDevice.currentValue("level")
+
+		if ((targetLevel == 99) && (priorLevel == 100)) targetLevel = 100
+
+		if (priorSwitchState != newSwitchState)
+		{
+			targetDevice.sendEvent(	name: "switch", value: newSwitchState, 
+							descriptionText: "Device ${targetDevice.displayName} set to ${newSwitchState}.", 
+							type: "physical" )
+			if (txtEnable) log.info "Device ${targetDevice.displayName} set to ${newSwitchState}."
+		}
+		if (targetLevel != 0 ) // Only handle on values 1-99 here. If device was turned off, that would be handle in the switch state block above.
+		{
+			// Don't send the event if the level doesn't change except if transitioning from off to on, always send!
+			if ((priorLevel != targetLevel) || (priorSwitchState != newSwitchState))
+			{
+				targetDevice.sendEvent( name: "level", value: targetLevel, 
+						descriptionText: "Device ${targetDevice.displayName} level set to ${targetLevel}%", 
+						type: "physical" )
+				if (txtEnable) log.info "Device ${targetDevice.displayName} level set to ${targetLevel}%"		
+			}
 		}
 	}
-
-	if (!isDimmer && !hasDimmer) log.warn "For device ${targetDevice.displayName} receive a report which wasn't processed. Need to check report handling code." + cmd
 }
 
 void on(Map params = [cd: null , duration: null , level: null ])
 {
 	log.debug "In function on(Map ...), map value is: $params"
-	def targetDevice = (params.cd ? params.cd : device)
+	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ? params.cd : device)
 	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
     Map levelEvent = null 
 	
@@ -1183,50 +1266,42 @@ void on(Map params = [cd: null , duration: null , level: null ])
 		Short level = params.level ? params.level : (targetDevice.currentValue("level") as Short ?: 100)
         level = Math.min(Math.max(level, 1), 100) // Level betweeen 1 and 100%
 	
-		sendToDevice(secure(supervise(zwave.switchMultilevelV4.switchMultilevelSet(value: Math.min(level, 99), dimmingDuration:(params.duration as Short) )), ep) )
+		sendSupervised(zwave.switchMultilevelV4.switchMultilevelSet(value: Math.min(level, 99), dimmingDuration:(params.duration as Short) ), ep)
 
 		levelEvent = [name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} set to level ${level}%", type: "digital"]
 	} 
 	else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
-		sendToDevice(secure(supervise(zwave.switchBinaryV1.switchBinarySet(switchValue: 255 )), ep))
+		sendSupervised(zwave.switchBinaryV1.switchBinarySet(switchValue: 255 ), ep)
 	}
 	else if (implementsZwaveClass(0x20, ep)) { // Basic Set Type device
 		log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
-		sendToDevice(secure(zwave.basicV2.basicSet(value: 0xFF ), ep))
+		sendToDevice(zwave.basicV2.basicSet(value: 0xFF ), ep)
 	} else  {
 		log.debug "Error in function on() - device ${targetDevice.displayName} does not implement a supported class"
 	}
 	
-	if (targetDevice.currentValue("switch") == "off") 
-	{	
-		if (logEnable) log.debug "Device ${targetDevice.displayName}: Turning switch from off to on."
+	if (targetDevice.currentValue("switch") == "off") {	
 		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
-		if (levelEvent) 
-			{
-				targetDevice.sendEvent(levelEvent)
-				log.debug "Device ${targetDevice.displayName}: Sending level event: ${levelEvent}."
-			}
-	} else {
-			if (logEnable) log.debug "Device ${targetDevice.displayName}: Switch already off. Inhibiting sending of off event."
 	}
+	if (levelEvent) targetDevice.sendEvent(levelEvent)
 }
 
 
 void off(Map params = [cd: null , duration: null ]) {
 
 	log.debug "In function off(Map ...), map value is: $params"
-	def targetDevice = (params.cd ? params.cd : device)
+	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ? params.cd : device)
 	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
 	if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning device to: Off."
 
 	if (implementsZwaveClass(0x26, ep)) { // Multilevel  type device
-		sendToDevice(secure(supervise(zwave.switchMultilevelV4.switchMultilevelSet(value: 0, dimmingDuration:params.duration as Short)), ep)	)	
+		sendSupervised(zwave.switchMultilevelV4.switchMultilevelSet(value: 0, dimmingDuration:params.duration as Short), ep)	
 	} else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
-		sendToDevice(secure(supervise(zwave.switchBinaryV1.switchBinarySet(switchValue: 0 )), ep))
+		sendSupervised(zwave.switchBinaryV1.switchBinarySet(switchValue: 0 ), ep)
 	} else if (implementsZwaveClass(0x20, ep)) { // Basic Set Type device
 		log.warn "Device ${targetDevice.displayName}: Using Basic Set to turn on device. A more specific command class should be used!"
-		sendToDevice(secure(supervise(zwave.basicV2.basicSet(value: 0 )), ep))
+		sendSupervised(zwave.basicV2.basicSet(value: 0 ), ep)
 	} else {
 		log.debug "Device ${targetDevice.displayName}: Error in function off(). Device does not implement a supported class"
 		return
@@ -1250,10 +1325,10 @@ void setLevel(Map params = [cd: null , level: null , duration: null ])
 {
 	log.debug "Called setLevel with a parameter map: ${params}"
 	
-	def targetDevice = (params.cd ? params.cd : device)
+	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ? params.cd : device)
 	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
-	Short newDimmerLevel = Math.min(Math.max(params.level as Integer, 0), 99) as Short
+	Short newDimmerLevel = Math.min(Math.max(params.level as Integer, 0), 100) as Short
 	Short transitionTime = null 
 	if (params.duration) transitionTime = params.duration as Short
 	
@@ -1265,21 +1340,20 @@ void setLevel(Map params = [cd: null , level: null , duration: null ])
 }
 
 void startLevelChange(direction, cd = null ){
-	def targetDevice = (cd ? cd : device)
+	com.hubitat.app.DeviceWrapper targetDevice = (cd ? cd : device)
 	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
     Integer upDown = (direction == "down" ? 1 : 0)
-    sendToDevice(secure(supervise(zwave.switchMultilevelV1.switchMultilevelStartLevelChange(upDown: upDown, ignoreStartLevel: 1, startLevel: 0)), ep))
+    sendSupervised(zwave.switchMultilevelV1.switchMultilevelStartLevelChange(upDown: upDown, ignoreStartLevel: 1, startLevel: 0), ep)
 }
 
 void stopLevelChange(cd = null ){
-	def targetDevice = (cd ? cd : device)
+	com.hubitat.app.DeviceWrapper targetDevice = (cd ? cd : device)
 	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
-	List<hubitat.zwave.Command> cmds = []
-		cmds.add(secure(supervise(zwave.switchMultilevelV1.switchMultilevelStopLevelChange()), ep))
-		cmds.add(secure(zwave.basicV1.basicGet(), ep))
-	sendToDevice(cmds)
+	sendSupervised(zwave.switchMultilevelV1.switchMultilevelStopLevelChange(), ep)
+	sendToDevice(zwave.basicV1.basicGet(), ep)
+
 }
 
 
@@ -1302,7 +1376,7 @@ String setCentralSceneButtonState(Integer button, String state) {
 }
 
 void getCentralSceneInfo() {
-	sendToDevice(secure( zwave.centralSceneV3.centralSceneSupportedGet() ))
+	sendToDevice(zwave.centralSceneV3.centralSceneSupportedGet() )
 }
 
 void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneNotification cmd)
@@ -1507,7 +1581,7 @@ Map<Short, BigInteger> getParameterValuesFromDevice(Map options = [useCache: tru
 		hubitat.zwave.Command report = null
 		inputs.each 
 			{ k, v ->
-				sendToDevice(secure(zwave.configurationV1.configurationGet(parameterNumber: k as Short)))
+				sendToDevice(zwave.configurationV1.configurationGet(parameterNumber: k as Short))
 				report = myReportQueue("7006").poll(10, TimeUnit.SECONDS)
 				if (! report) return
 				// Single-byte return values > 127 get turned into negative numbers when using scaledConfigurationValue, so don't use cmd.scaledConfiguraiton if cmd.size == 1!
