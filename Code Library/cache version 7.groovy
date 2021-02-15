@@ -11,10 +11,8 @@ metadata {
 		capability "Switch"
 		capability "SwitchLevel"
 		// capability "ChangeLevel"
+        capability "Lock"
 		
-		command "deleteChildDevices"
-		command "createChildDevices"
-
         attribute "buttoonTripleTapped", "number"	
 		attribute "buttonFourTaps", "number"	
 		attribute "buttonFiveTaps", "number"	         
@@ -27,7 +25,6 @@ metadata {
 		command "logStoredReportCache"
 		command "getInputControlsForDevice"
 		command "getOpenSmartHouseData"
-		command "clearState"
 		command "getParameterValuesFromDevice"
 		command "setInputControlParameterValuesToDeviceValue"
 		command "getParameterValuesFromInputControls"
@@ -35,46 +32,113 @@ metadata {
 	
     preferences 
 	{
-		input title:"Device Lookup", description: "<p> <a href=\"https://www.opensmarthouse.org/zwavedatabase/\" target=\"_blank\">Click Here to get your Device Info.</a> </p>", type: "paragraph", element: "Device Information"
+		input title:"Device Information Lookup", description: "<p> ${state.deviceInformation} </p>", type: "paragraph", element: "Get device information from the OpenSmartHouse database"
 		
-        input name: "advancedEnable", type: "bool", title: "Enable Advanced Configuration", defaultValue: true
-        
+        input name: "advancedEnable", type: "bool", title: "Enable Advanced Configuration", defaultValue: false
+        input name: "showParameterInputs", type: "bool", title: "Show Parameter Value Input Controls", defaultValue: false        
         if (advancedEnable)
         {
 			input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false
 			input name: "txtEnable", type: "bool", title: "Enable text logging", defaultValue: true
 			input name: "superviseEnable", type: "bool", title: "Enable Command Supervision if supported", defaultValue: true
-
 			// The following preferences are only for use while debugging. Remove them from final code
-			input name: "remindEnable", type: "bool", title: "Enable Code To-Do Reminders", defaultValue: true
-		
+			input name: "remindEnable", type: "bool", title: "Enable Coding To-Do Reminders", defaultValue: false
+		}
+		if (showParameterInputs)
+		{
 			ConcurrentHashMap inputs = getInputControlsForDevice()
-		
 			List<Integer> keyset = inputs?.keySet().collect{ it as Integer}
-
 			keyset?.sort().each{ input inputs.get(it) }
         }
     }	
-	
 }
 
-void clearState()
+///////////////////////////////////////////////////////////////////////
+//////        Install, Configure, Initialize, and Refresh       ///////
+///////////////////////////////////////////////////////////////////////
+void clearLeftoverSettings()
 {
-	state.clear()
-	
-	// Clean out any old settings names!
+	// Clean out any old settings names left behind by other driver versions!
 	ConcurrentHashMap inputs = getInputControlsForDevice()
-	List<String> allSettingNames = ["logEnable", "txtEnable", "superviseEnable"] + inputs.values().collect{it.name as String } 
+	List<String> allSettingNames = ["logEnable", "txtEnable", "superviseEnable", "remindEnable", "showParameterInputs"] + inputs.values().collect{it.name as String } 
 	settings.each{k, v -> 
 		if (allSettingNames.contains( k as String)) return
 		device.removeSetting(k as String) 
 		}
 }
-void deleteChildDevices()
+
+void installed() { 
+	state.clear()
+	clearLeftoverSettings()
+}
+
+void configure() { 
+	if (txtEnable) log.info "Device ${device.displayName}: Executing configure routine."
+	if (txtEnable) log.info "Device ${device.displayName}: clearing old state data."
+	state.clear()
+	clearLeftoverSettings()
+	if (txtEnable) log.info "Device ${device.displayName}: Creating child devices (if supported)."
+	deleteUnwantedChildDevices()
+	createChildDevices()
+	initialize() 
+	if (txtEnable) log.info "Device ${device.displayName}: Configuration complete."
+	
+}
+
+void initialize( )
 {
+	if (txtEnable) log.info "Device ${device.displayName}: Performing startup initialization routine."
+
+	if (txtEnable) log.info "Device ${device.displayName}: Pre-Caching device information."
+	preCacheReports()
+	if (txtEnable) log.info "Device ${device.displayName}: Getting parameter values from device."
+	setInputControlParameterValuesToDeviceValue()
+	if (txtEnable) log.info "Device ${device.displayName}: Getting input controls for device."
+	getInputControlsForDevice()
+	if (txtEnable) log.info "Device ${device.displayName}: Initialization complete."
+	
+}
+
+void refresh(Map params = [cd: null ])
+{
+	def targetDevice = (params.cd ? params.cd : device)
+	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
+	
+	if (implementsZwaveClass(0x26, ep)) { // Multilevel  type device
+		sendToDevice(secure(zwave.switchMultilevelV4.switchMultilevelGet(), ep) )
+	} else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
+		sendToDevice(secure(zwave.switchBinaryV1.switchBinaryGet(), ep))
+	} else { // Basic Set Type device
+		log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
+		sendToDevice(secure(zwave.basicV2.basicGet(), ep))
+	}
+	
+	meterRefresh( ep )
+}
+
+/////////////////////////////////////////////////////////////////////////
+//////        Create and Manage Child Devices for Endpoints       ///////
+/////////////////////////////////////////////////////////////////////////
+
+void deleteUnwantedChildDevices()
+{
+	// Delete child devices that don't use the proper network ID form (parent ID, followed by "-ep" followed by endpoint number).
 	getChildDevices()?.each
-	{ child ->
-		deleteChildDevice(child.deviceNetworkId)
+	{ child ->	
+	
+		List childNetIdComponents = child.deviceNetworkId.split("-ep")
+                    
+		if (childNetIdComponents.size() != 2) {
+			deleteChildDevice(child.deviceNetworkId)			
+			
+		} else {
+            Boolean endPointInRange = ((0 as Short) < (childNetIdComponents[1] as Short)) && ((childNetIdComponents[1] as Short) <= numberOfEndPoints)
+			Boolean parentNetIdMatches = (childNetIdComponents[0]  == device.deviceNetworkId)
+			
+            if (!(parentNetIdMatches && endPointInRange )) {
+				deleteChildDevice(child.deviceNetworkId)	
+			}
+		}
 	}
 }
 
@@ -89,29 +153,6 @@ void createChildDevices()
 	
 	Short numberOfEndPoints = endPointReport.endPoints
 	log.debug "Device ${device.displayName}: has ${numberOfEndPoints} endpoints."
-
-	// Delete child devices that don't use the proper network ID form (parent ID, followed by "-ep" followed by endpoint number).
-	getChildDevices()?.each
-	{ child ->	
-	
-		List childNetIdComponents = child.deviceNetworkId.split("-ep")
-                    
-		if (childNetIdComponents.size() != 2) {
-			log.debug "Device ${device.displayName}: child component ${child.displayName} is not a valid child device and is being deleted!"
-			deleteChildDevice(child.deviceNetworkId)			
-			
-		} else {
-            Boolean endPointInRange = ((0 as Short) < (childNetIdComponents[1] as Short)) && ((childNetIdComponents[1] as Short) <= numberOfEndPoints)
-			Boolean parentNetIdMatches = (childNetIdComponents[0]  == device.deviceNetworkId)
-			
-            if (parentNetIdMatches && endPointInRange ) {
-				log.debug "Device ${device.displayName}: child component ${child.displayName} is a valid child device!"
-		    } else {
-				log.debug "Device ${device.displayName}: child component ${child.displayName} NOT a valid child device for this driver!"
-				deleteChildDevice(child.deviceNetworkId)	
-			}
-		}
-	}
 	
 	Short thisKid = 1
 	for ( thisKid; thisKid <= numberOfEndPoints; thisKid++)
@@ -139,33 +180,9 @@ void createChildDevices()
 	}
 }
 
-void installed() { initialize() }
-
-void configure() { initialize() }
-
-void initialize( )
-{
-	// preCacheReports()
-	setInputControlParameterValuesToDeviceValue()
-}
-
-void refresh(Map params = [cd: null ])
-{
-	def targetDevice = (params.cd ? params.cd : device)
-	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
-	
-	if (implementsZwaveClass(0x26, ep)) { // Multilevel  type device
-		sendToDevice(secure(zwave.switchMultilevelV4.switchMultilevelGet(), ep) )
-	} else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
-		sendToDevice(secure(zwave.switchBinaryV1.switchBinaryGet(), ep))
-	} else { // Basic Set Type device
-		log.warn "Using Basic Set to turn on device ${targetDevice.displayName}. A more specific command class should be used!"
-		sendToDevice(secure(zwave.basicV2.basicGet(), ep))
-	}
-	
-	meterRefresh( ep )
-}
-
+//////////////////////////////////////////////////////////////
+//////                  Manage Metering                ///////
+//////////////////////////////////////////////////////////////
 void meterRefresh ( Short ep = null ) 
 {
 	if (!implementsZwaveClass(0x32, ep) ) return
@@ -206,7 +223,7 @@ void meterRefresh ( Short ep = null )
 	}
 }
 
-Map<String, Boolean> getElectricMeterScalesSupportedMap( Short ep = null )
+Map<String, Boolean> getElectricMeterScalesSupportedMap(Short ep = null )
 {
 	def targetDevice
 	if (ep) {
@@ -236,9 +253,7 @@ Map<String, Boolean> getElectricMeterScalesSupportedMap( Short ep = null )
             meterMap.put("kVar"	, false )
 			meterMap.put("kVarh", false )
         }
-		
 		return meterMap
-        
     } else  {
 		log.warn "Device ${targetDevice.displayName}: Received a meter support type of ${report.meterType} which is not processed by this code."
 		return null
@@ -257,9 +272,8 @@ void zwaveEvent(hubitat.zwave.commands.meterv5.MeterReport cmd, Short ep = null 
 	
 	if (cmd.meterType == 1)
 	{
-		try {
-			switch (cmd.scale as Integer)
-			{
+		switch (cmd.scale as Integer)
+		{
 			case 0: // kWh
 				targetDevice.sendEvent(name: "energy", value: cmd.scaledMeterValue, unit: "kWh")
 				if (txtEnable) log.info "${targetDevice.displayName}: Energy report received with value of ${cmd.scaledMeterValue} kWh"
@@ -308,11 +322,8 @@ void zwaveEvent(hubitat.zwave.commands.meterv5.MeterReport cmd, Short ep = null 
 						break
 				} 
 			   break
-			}
-		} catch (ex)
-		{
-			log.debug "Error ${ex} processing report ${cmd}. Report is of class ${cmd.class}."
 		}
+
 	} else {
 		log.warn "Device ${targetDevice.displayName}: Received unexpected meter type for ${targetDevice.displayName}. Only type '1' (Electric Meter) is supported. Received type: ${cmd.meterType}"
 	}
@@ -412,16 +423,19 @@ void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd, ep
 		[ 	1:[ // Smoke
 				0:[[name:"smoke" , value:"clear", descriptionText:"Smoke detector status Idle."]], 
 				1:[[name:"smoke" , value:"detected", descriptionText:"Smoke detected (location provided)."]], 
-				2:[[name:"smoke" , value:"detected", descriptionText:"Smoke detected."]],
-				254:[]
-				], // Smoke
+				2:[[name:"smoke" , value:"detected", descriptionText:"Smoke detected."]]
+				],
+			2:[ // CO
+				0:[[name:"carbonMonoxide" , value:"clear", descriptionText:"Smoke detector status Idle."]], 
+				1:[[name:"carbonMonoxide" , value:"detected", descriptionText:"Smoke detected (location provided)."]], 
+				2:[[name:"carbonMonoxide" , value:"detected", descriptionText:"Smoke detected."]]
+				],
 			5:[ // Water
 				0:[[name:"water" , value:"dry", descriptionText:"Water Alarm Notification, Status Dry."]], 
 				1:[[name:"water" , value:"wet", descriptionText:"Water leak detected (location provided)."]], 
-				2:[[name:"water" , value:"wet", descriptionText:"Water leak detected."]], 
-				254:[]
-				], // Water
-			6:[ // Access Control
+				2:[[name:"water" , value:"wet", descriptionText:"Water leak detected."]]
+				],
+			6:[ // Access Control (Locks)
 				0:[], 
 				1:[[name:"lock" , value:"locked", descriptionText:"Manual lock operation"]], 
 				2:[[name:"lock" , value:"unlocked", descriptionText:"Manual unlock operation"]], 
@@ -431,21 +445,42 @@ void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd, ep
 				6:[[name:"lock" , value:"unlocked", descriptionText:"Keypad unlock operation"]], 
 				11:[[name:"lock" , value:"unknown", descriptionText:"Lock jammed"]], 				
 				254:[[name:"lock" , value:"unknown", descriptionText:"Lock in unknown state"]]
-				], // Locks
-			7:[
+				],
+			7:[ // Home Security
 				0:[[name:"tamper" , value:"clear", descriptionText:"Tamper state cleared."],[name:"motion" , value:"inactive", descriptionText:"Motion Inactive."] ], 
-				3:[[name:"tamper" , value:"detected", descriptionText:""]], 
+				3:[[name:"tamper" , value:"detected", descriptionText:"Tampering, device cover removed"]], 
 				4:[[name:"tamper" , value:"detected", descriptionText:"Tampering, invalid code."]], 
 				7:[[name:"motion" , value:"active", descriptionText:"Motion detected (location provided)."]],
 				8:[[name:"motion" , value:"active", descriptionText:"Motion detected."]],
-				9:[[name:"tamper" , value:"detected", descriptionText:"Tampering (Product Moved)."]],
-				254:[]
-				], // Motion
-			
+				9:[[name:"tamper" , value:"detected", descriptionText:"Tampering, device moved"]]
+				],
+			14:[ // Siren
+				0:[[name:"alarm" , value:"off", descriptionText:"Alarm Siren Off."]], 
+				1:[[name:"alarm" , value:"siren", descriptionText:"Alarm Siren On."]]
+				], 
+			15:[ // Water Valve
+				0:[[name:"valve" , value:( (cmd.event ) ? "open" : "closed"), descriptionText:"Valve Operation."]], 
+				1:[[name:"valve" , value:( (cmd.event ) ? "open" : "closed"), descriptionText:"Master Valve Operation."]] 
+				], 
+			22:[ // Presence
+				0:[[name:"presence" , value:"not present", descriptionText:"Home not occupied"]], 
+				1:[[name:"presence" , value:"present", descriptionText:"Home occupied (location provided)"]],  
+				2:[[name:"presence" , value:"present", descriptionText:"Home occupied"]]
+				]
+				
 		].get(cmd.notificationType as Integer)?.get(cmd.event as Integer)
 	
-
-	events?.each{ targetDevice.sendEvent(it) }
+	if ( ! events ) { 
+		log.warn "Device ${device.displayName}: Received an unhandled notifiation event ${cmd} for endpoint ${ep}." 
+	} else { 
+		events?.each{ 
+			if (targetDevice.hasAttribute(it.name)) { 
+				targetDevice.sendEvent(it) 
+			} else {
+				log.warn "Device ${targetDevice.displayName}: Device missing attribute for notification event ${it}, notification report: ${cmd}."
+			}
+		}
+	}
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -581,7 +616,7 @@ hubitat.zwave.Command  getCachedVersionCommandClassReport(Short requestedCommand
 	if (cmd) { 
 		return cmd
 	} else {
-		sendToDevice(secure(zwave.versionV3.versionCommandClassGet(requestedCommandClass: requestedCommandClass )))
+		sendToDevice(secure(zwave.versionV1.versionCommandClassGet(requestedCommandClass: requestedCommandClass )))
 		cmd = myReportQueue("8614").poll(10, TimeUnit.SECONDS)
 		if(cmd.is( null ) ) {log.warn "Device ${device.displayName}: failed to retrieve a requested command class ${requestedCommandClass}."; return null }
 		ClassReports.put(cmd.requestedCommandClass, cmd)
@@ -634,7 +669,7 @@ hubitat.zwave.Command   getReportCachedByProductId(Map options = [:], hubitat.zw
 {
 	if (!implementsZwaveClass(getCmd.commandClassId, ep))
 		{
-			log.debug "Command ${getCmd.commandClassId} not implemented by this device for endpoint ${ep ?: 0}: " + getCmd
+			// if (logEnable) log.debug "Command class ${getCmd.commandClassId} not implemented by this device for endpoint ${ep ?: 0}: " + getCmd
 			return null
 		}
 	Short subIndex
@@ -655,12 +690,12 @@ hubitat.zwave.Command   getReportCachedByProductId(Map options = [:], hubitat.zw
 	
 	if (cmd) { 
 		return cmd
-		if (logEnable) log.debug "Device ${device.displayName}: In function getReportCachedByProductId, getting report using command ${getCmd} for endpoint ${ep}."
+		// if (logEnable) log.debug "Device ${device.displayName}: In function getReportCachedByProductId, getting report using command ${getCmd} for endpoint ${ep}."
 	} else {
-		if (logEnable) log.debug "Device ${device.displayName}: sending to device a command : ${getCmd} to get report ${reportClass} for subIndex ${subIndex}."
+		// if (logEnable) log.debug "Device ${device.displayName}: sending to device a command : ${getCmd} to get report ${reportClass} for subIndex ${subIndex}."
 		sendToDevice(secure(getCmd, ep))
 		Map transferredData = myReportQueue(reportClass).poll(10, TimeUnit.SECONDS)
-		if (logEnable) log.debug "Device ${device.displayName}: Transferred data for report ${getCmd} is: " + transferredData
+		// if (logEnable) log.debug "Device ${device.displayName}: Transferred data for report ${getCmd} is: " + transferredData
 		cmd =  transferredData.report
 		cacheForThisSubIndex.put(cmd.CMD, cmd)
 	}
@@ -756,14 +791,20 @@ Integer implementsZwaveClass(Short commandClass, Short ep = null )
 		if (supportsEndpoints && (ep <= numberOfEndPoints))
 		{
 		report = getCachedMultiChannelCapabilityReport(ep)
-		if(report.commandClass.contains(commandClass)) return getCachedVersionCommandClassReport(commandClass).commandClassVersion
+		if (report.commandClass.contains(commandClass)) return getCachedVersionCommandClassReport(commandClass)?.commandClassVersion
 		} else {
 			log.warn "Device ${device.displayName}: called function implementsZwaveClass(commandClass = ${commandClass}, ep = ${ep}). Maximum endpoints supported by this device is: ${numberOfEndPoints ? numberOfEndPoints : 0}" 
 			return null
 		}
 		
 	} else  if (deviceClasses.contains(commandClass)) {
-		return getCachedVersionCommandClassReport(commandClass).commandClassVersion
+		Integer returnClassVersion = getCachedVersionCommandClassReport(commandClass)?.commandClassVersion
+		
+		if (! returnClassVersion) { 
+				log.warn "Device ${device.displayName}: In implementsZwaveClass function, Failed to retrieve a command class version for command class ${commandClass} even though class is supported. Forcing a return of 1."
+				returnClassVersion = 1 
+			} 
+		return returnClassVersion
 	} 
 	return null
 }
@@ -1309,21 +1350,16 @@ should be called AFTER retrieving the device's firmware version using getFirmwar
 Map getInputControlsForDevice()
 {
 	ConcurrentHashMap inputControls = OpenSmartHouseRecords.get(firmwareKey(), new ConcurrentHashMap())
-	log.debug "inputControls are: " + inputControls
 	if (inputControls?.size() > 0) 
 	{
 		if (!state.parameterInputs?.containsKey(firmwareKey()))
 		{
-			log.debug "state.parameterInputs missing the firmware key. Recreating"
 			state.remove("parameterInputs")
 			state.parameterInputs = [(firmwareKey()):inputControls]
 		} else { log.debug "already storing state for inputControls" }
 		
 	} else if (state.parameterInputs?.containsKey(firmwareKey())) {
-
-		log.debug "State contains the key. loading inputs from state"
-			state.parameterInputs.get(firmwareKey()).each{ k, v -> inputControls.put( k as Integer, v) }
-		
+		state.parameterInputs.get(firmwareKey()).each{ k, v -> inputControls.put( k as Integer, v) }
 		if (logEnable) log.debug "Device ${device.displayName}: Loaded Input Controls from saved state data. Controls are ${inputControls}"
 	} else {
 		if (logEnable) log.debug "Retrieving input control date from opensmarthouse.org for device ${device.displayName}."
@@ -1333,7 +1369,6 @@ Map getInputControlsForDevice()
 			if (inputControls) state.parameterInputs = [(firmwareKey()):inputControls]
 		} catch (ex) {
 			log.warn "Device ${device.displayName}: An Error occurred when attempting to get input controls. Error: ${ex}. Stack trace is: ${getStackTrace(ex)}. Exception message is ${getExceptionMessageWithLine(ex)}"
-
 			return null
 		}
 	}
@@ -1381,7 +1416,7 @@ List getOpenSmartHouseData()
 		log.warn "Device ${device.displayName}: No database entry found for manufacturer: ${manufacturer}, deviceType: ${deviceType}, deviceID: ${deviceID}"
 		return null
 	}
-    
+    state.deviceInformation = "<a href=\"https://www.opensmarthouse.org/zwavedatabase/${thisDeviceData?.id}/\" target=\"_blank\" >Click Here to get your Device Info.</a>"
     String queryByDatabaseID= "http://www.opensmarthouse.org/dmxConnect/api/zwavedatabase/device/read.php?device_id=${thisDeviceData.id}"    
     
 	httpGet([uri:queryByDatabaseID]) { resp-> 
@@ -1397,6 +1432,12 @@ Map createInputControls(data)
 	Map inputControls = [:]	
 	data.each
 	{
+		if (it.read_only as Integer)
+			{
+				log.info "Device ${device.displayName}: Parameter ${it.param_id}-${it.label} is read-only. No input control created."
+				return
+			}
+	
 		if (it.bitmask.toInteger())
 		{
 			if (!(inputControls?.get(it.param_id)))
@@ -1415,7 +1456,10 @@ Map createInputControls(data)
 			it.options.each { deviceOptions.put(it.value, it.label) }
 			
 			// Set input type. Should be one of: bool, date, decimal, email, enum, number, password, time, text. See: https://docs.hubitat.com/index.php?title=Device_Preferences
-			if (deviceOptions)
+			
+			// use enum but only if it covers all of the choices!
+			Integer numberOfValues = (it.maximum - it.minimum) +1
+			if (deviceOptions && (deviceOptions.size() == numberOfValues) )
 			{
 				newInput.type = "enum"
 				newInput.options = deviceOptions
@@ -1456,12 +1500,10 @@ Map<Short, BigInteger> getParameterValuesFromDevice(Map options = [useCache: tru
 		
 	if (haveAllConfigurationReports && options.useCache && (parameterReports.size() > 0) ) 
 	{
-		if (logEnable) log.debug "Device ${device.displayName}: Getting parameter values from cached reports"
 		parameterReports.each{ key, report ->
 			parameterValues.put(key as Short, report.scaledConfigurationValue as BigInteger)
 			}
 	} else {
-		if (logEnable) log.debug "Device ${device.displayName}: Getting parameter values from device."
 		hubitat.zwave.Command report = null
 		inputs.each 
 			{ k, v ->
@@ -1483,7 +1525,7 @@ void setInputControlParameterValuesToDeviceValue()
 {
 	Map<Short, BigInteger> parameterValues =  getParameterValuesFromDevice(useCache: true )
 	ConcurrentHashMap<Short, BigInteger> pendingChanges = getPendingChangeMap()
-	
+	log.debug "setting values of input controls"
 	parameterValues.each{ key, value ->
 		String configName = "configParam${"${key}".padLeft(3,"0")}"
 		if (logEnable) log.debug "Device ${device.displayName}: updating settings data for ${configName} to new value ${value}!"
@@ -1585,10 +1627,112 @@ void setParameter(Map params = [parameterNumber: null , value: null ] ){
 			if ((report.scaledConfigurationValue) == (params.value as BigInteger)) {
 				log.info "Device ${device.displayName}: Successfully set parameter #: ${params.parameterNumber} to value ${params.value}."
 			} else {
-				log.warn "Device ${device.displayName}: Failed to set parameter #: ${params.parameterNumber} to value ${params.value}. Value of parameter is set to ${report.scaledConfigurationValu} instead."
+				log.warn "Device ${device.displayName}: Failed to set parameter #: ${params.parameterNumber} to value ${params.value}. Value of parameter is set to ${report.scaledConfigurationValue} instead."
 			}
 		}
     }
 }
 
+//////////////////////////////////////////////////////////////////////
+//////        Locks        ///////
+//////////////////////////////////////////////////////////////////////
 
+void lockInitialize()
+{
+	sendToDevice (secure( zwave.userCodeV1.usersNumberGet() ))
+}
+
+void zwaveEvent(hubitat.zwave.commands.usercodev1.UserCodeReport cmd) { 
+	log.warn "Lock code is still under development. Functions may not be fully implemented."
+	if (logEnable) log.debug "For device ${device.displayName}, received User Code Report: " + cmd
+}
+
+void zwaveEvent(hubitat.zwave.commands.usercodev1.UsersNumberReport cmd) { 
+	log.warn "Lock code is still under development. Functions may not be fully implemented."
+
+	if (logEnable) log.debug "For device ${device.displayName}, received Users Number Report: " + cmd
+	sendEvent(name:"maxCodes", value: cmd.supportedUsers)
+}
+
+void lockrefresh()
+{
+	sendToDevice (secure(zwave.doorLockV1.doorLockOperationGet()))
+}
+void lock()
+{
+	List<hubitat.zwave.Command> cmds=[]
+	cmds << secure( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0xFF) )
+	cmds << "delay 4500"
+	cmds << secure( zwave.doorLockV1.doorLockOperationGet() )
+	sendToDevice(cmds)
+}
+
+void unlock()
+{
+	List<hubitat.zwave.Command> cmds=[]
+	cmds << secure( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0x00) )
+	cmds << "delay 4500"
+	cmds << secure( zwave.doorLockV1.doorLockOperationGet() )
+	sendToDevice(cmds)
+}
+
+void deleteCode(codeposition)
+{
+    if (logEnable) log.debug "Device ${device.displayName}:  deleting code at position ${codeNumber}."
+	// userIDStatus of 0 corresponds to Z-Wave  "Available (not set)" status.
+	sendToDevice (secure( zwave.userCodeV1.userCodeSet(userIdentifier:codeNumber, userIdStatus:0) ))
+	sendToDevice (secure( zwave.userCodeV1.userCodeGet(userIdentifier:codeNumber) ))
+}
+
+void getCodes()
+{
+	log.warn "Device ${device.displayName}: Lock code is still under development. getCodes function is not be fully implemented."
+
+	List<hubitat.zwave.Command> cmds=[]
+		cmds << secure(zwave.userCodeV1.usersNumberGet())
+		
+		// need to first get the usersNumber and then get the code for each of those users!
+		cmds << secure(zwave.userCodeV1.userCodeGet(userIdentifier: 1))
+	sendToDevice(cmds)
+}
+
+void setCode(codeposition, pincode, name)
+{
+	log.warn "Device ${device.displayName}: Lock code is still under development. setCode function does not check for code length. You must ensure you use a permitted length!."
+
+	String userCode = pincode as String
+	if (logEnable) log.debug "Device ${device.displayName}: setting code at position ${codeposition} to ${pincode}."
+	assert (userCode instanceof String) 
+
+	List<hubitat.zwave.Command> cmds=[]
+	cmds << secure( zwave.userCodeV1.userCodeSet(userIdentifier:codeNumber, userIdStatus:0) )
+	cmds << secure(zwave.userCodeV1.userCodeSet(userIdentifier:codeposition, userIdStatus:1, userCode:userCode ))
+	cmds << secure(zwave.userCodeV1.userCodeGet(userIdentifier:codeposition))
+	sendToDevice(cmds)
+}
+
+void setCodeLength(pincodelength)
+{
+	log.warn "Device ${device.displayName}: Code Length command not supported. If your device supports code length settings, you may be able to set the code length using Z-Wave Parameter Settings controls."
+}
+
+// This is another form of door lock reporting. I believe its obsolete, but I've included it just in case some lock requires it.  
+// Modes 2-4 are not implemented by Hubitat.
+void zwaveEvent(hubitat.zwave.commands.doorlockv1.DoorLockOperationReport cmd) 
+{
+	if (logEnable) log.debug "Received Door Lock Operation Report: " + cmd  
+	
+	Map lockEvent =
+		[
+			0:[name:"lock" , value:"unlocked", descriptionText:"Door unsecured"], 
+			1:[name:"lock" , value:"unlocked with timeout", descriptionText:"Door Unsecured with timeout"], 
+			16:[name:"lock" , value:"unlocked", descriptionText:"Door Unsecured for inside Door Handles"], 
+			17:[name:"lock" , value:"unlocked with timeout", descriptionText:"Door Unsecured for inside Door Handles with timeout"], 
+			32:[name:"lock" , value:"unlocked", descriptionText:"Door Unsecured for outside Door Handles"], 
+			33:[name:"lock" , value:"unlocked with timeout", descriptionText:"Door Unsecured for outside Door Handles with timeout"],
+			254:[name:"lock" , value:"unknown", descriptionText:"Lock in unknown state"],
+			255:[name:"lock" , value:"locked", descriptionText:"Door Secured"]
+		].get(cmd.doorLockMode as Integer)
+
+	if (lockEvent) sendEvent(lockEvent)
+}
