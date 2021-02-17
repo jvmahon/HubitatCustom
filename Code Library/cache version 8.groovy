@@ -123,7 +123,7 @@ void initialize( )
 
 void refresh(Map params = [cd: null ])
 {
-	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ? params.cd : device)
+	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ?: device)
 	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
 	if (implementsZwaveClass(0x26, ep)) { // Multilevel  type device
@@ -471,8 +471,8 @@ void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd, ep
 				1:[[name:"alarm" , value:"siren", descriptionText:"Alarm Siren On."]]
 				], 
 			15:[ // Water Valve
-				0:[[name:"valve" , value:( (cmd.event ) ? "open" : "closed"), descriptionText:"Valve Operation."]], 
-				1:[[name:"valve" , value:( (cmd.event ) ? "open" : "closed"), descriptionText:"Master Valve Operation."]] 
+				0:[[name:"valve" , value:( (cmd.event > 0 ) ? "open" : "closed"), descriptionText:"Valve Operation."]], 
+				1:[[name:"valve" , value:( (cmd.event > 0 ) ? "open" : "closed"), descriptionText:"Master Valve Operation."]] 
 				], 
 			22:[ // Presence
 				0:[[name:"presence" , value:"not present", descriptionText:"Home not occupied"]], 
@@ -1049,17 +1049,71 @@ void componentStopLevelChange(com.hubitat.app.DeviceWrapper cd) {
 }
 
 void componentSetSpeed(com.hubitat.app.DeviceWrapper cd, speed) {
-    if (logEnable) log.info "Device ${device.displayName}: received setSpeed(${speed}) request from ${cd.displayName}"
-	log.warn "componentSetSpeed not yet implemented in driver!"
+    if (logEnable) log.info "Device ${device.displayName}: received componentSetSpeed(${speed}) request from ${cd.displayName}"
 	setSpeed(speed:speed, cd:cd)
 }
 
-void setSpeed(Map params = [speed: null , cd: null ], speed, com.hubitat.app.DeviceWrapper cd = null )
+String levelToSpeed(Integer level)
 {
-	com.hubitat.app.DeviceWrapper targetDevice = (cd ? cd : device)
-	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
-	log.warn "setSpeed function not implemented yet!"
-	log.debug "Device ${targetDevice.displayName}: called setSpeed. Child device: ${ (cd) ? true : false }"
+	switch (level)
+	{
+	case 0 :
+		return "off"
+		break
+	case 1..20:
+		return "low"
+		break
+	case 21..40:
+		return "medium-low"
+		break
+	case 41..60:
+		return "medium"
+		break
+	case 61..80:
+		return "medium-high"
+		break
+	case 81..100:
+		return "high"
+		break
+	}
+}
+void setSpeed(speed, com.hubitat.app.DeviceWrapper cd = null ) { setSpeed(speed:speed, cd:cd) }
+void setSpeed(Map params = [speed: "on" , cd: null ])
+{
+	com.hubitat.app.DeviceWrapper targetDevice = params.cd ?: device
+	Short ep = params.cd ? (targetDevice.deviceNetworkId.split("-ep")[-1] as Short) : null
+	
+    if (logEnable) log.info "Device ${device.displayName}: received setSpeed(${params.speed}) request from child ${targetDevice.displayName}"
+
+	
+	String newSpeed = params.speed
+	Integer level
+	
+	 if (newSpeed == "on")
+	 {
+	 	targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} switch set to off", type: "digital")
+		
+		level = targetDevice.currentValue("level")
+		
+		targetDevice.sendEvent(name: "level", value: level , descriptionText: "Device ${targetDevice.displayName} level set to ${newLevel}", type: "digital")
+		
+		targetDevice.sendEvent(name: "speed", value: levelToSpeed(level) , descriptionText: "Device ${targetDevice.displayName} level set to ${levelToSpeed(level)}", type: "digital")
+
+	 } else if (newSpeed == "off")
+	 { 
+		targetDevice.sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} switch set to off", type: "digital")
+		
+		targetDevice.sendEvent(name: "speed", value: "off", descriptionText: "Device ${targetDevice.displayName} speed set to off", type: "digital")	 
+	 } else {
+	 	level = ["low":20, "medium-low":40, "medium":60, "medium-high":80, "high":99].get(newSpeed)
+		
+		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} switch set to on", type: "digital")
+		
+		targetDevice.sendEvent(name: "speed", value: newSpeed, descriptionText: "Device ${targetDevice.displayName} speed set to ${newSpeed}", type: "digital")
+		
+		targetDevice.sendEvent(name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} level set to ${level}", type: "digital")
+	 }
+
 }
 
 // void setPosition(position) { setPosition(position:position, cd: null )}
@@ -1265,18 +1319,23 @@ void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelReport
 void on(Map params = [cd: null , duration: null , level: null ])
 {
 	log.debug "In function on(Map ...), map value is: $params"
-	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ? params.cd : device)
+	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ?: device)
 	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
-    Map levelEvent = null 
+	
+	if (targetDevice.hasAttribute("switch") && targetDevice.currentValue("switch") == "off") {	
+		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
+	}
 	
 	if (implementsZwaveClass(0x26, ep)) // Multilevel  type device
 	{ 
-		Short level = params.level ? params.level : (targetDevice.currentValue("level") as Short ?: 100)
-        level = Math.min(Math.max(level, 1), 100) // Level betweeen 1 and 100%
+		Short level = (! params.level.is( null )) ? params.level : (targetDevice.currentValue("level") as Short ?: 100)
+        level = Math.min(Math.max(level, 1), 100) // Level between 1 and 100%
 	
 		sendSupervised(zwave.switchMultilevelV3.switchMultilevelSet(value: Math.min(level, 99), dimmingDuration:(params.duration as Short) ), ep)
 
-		levelEvent = [name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} set to level ${level}%", type: "digital"]
+		if (targetDevice.hasAttribute("level")) {
+			targetDevice.sendEvent(name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} set to level ${level}%", type: "digital")
+		}
 	} 
 	else if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
 		sendSupervised(zwave.switchBinaryV1.switchBinarySet(switchValue: 255 ), ep)
@@ -1287,18 +1346,13 @@ void on(Map params = [cd: null , duration: null , level: null ])
 	} else  {
 		log.debug "Error in function on() - device ${targetDevice.displayName} does not implement a supported class"
 	}
-	
-	if (targetDevice.currentValue("switch") == "off") {	
-		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")
-	}
-	if (levelEvent) targetDevice.sendEvent(levelEvent)
 }
 
 
 void off(Map params = [cd: null , duration: null ]) {
 
 	log.debug "In function off(Map ...), map value is: $params"
-	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ? params.cd : device)
+	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ?: device)
 	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
 	if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning device to: Off."
@@ -1315,12 +1369,8 @@ void off(Map params = [cd: null , duration: null ]) {
 		return
 	}
 
-	if (targetDevice.currentValue("switch") == "on") 
-	{	
-		if (logEnable) log.debug "Device ${targetDevice.displayName}: Turning switch from on to off."
+	if (targetDevice.hasAttribute("switch") && targetDevice.currentValue("switch") != "off") {	
 		targetDevice.sendEvent(name: "switch", value: "off", descriptionText: "Device ${targetDevice.displayName} turned off", type: "digital")
-	} else {
-		if (logEnable) log.debug "Device ${targetDevice.displayName}: Switch already off. Inhibiting sending of off event."
 	}
 }
 
@@ -1333,7 +1383,7 @@ void setLevel(Map params = [cd: null , level: null , duration: null ])
 {
 	log.debug "Called setLevel with a parameter map: ${params}"
 	
-	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ? params.cd : device)
+	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ?: device)
 	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
 	Short newDimmerLevel = Math.min(Math.max(params.level as Integer, 0), 100) as Short
