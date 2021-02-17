@@ -1033,9 +1033,14 @@ void componentOff(com.hubitat.app.DeviceWrapper cd){
 	off(cd:cd)
 }
 
-void componentSetLevel(com.hubitat.app.DeviceWrapper cd,level,transitionTime = null) {
-    log.debug "Device ${device.displayName}: received componentSetLevel(${level}, ${transitionTime}) request from ${cd.displayName}"
-	setLevel(level:level, duration:transitionTime, cd:cd)
+void componentSetLevel(com.hubitat.app.DeviceWrapper cd, level, transitionTime = null) {
+    log.debug "Device ${device.displayName}: received componentSetLevel(level: ${level}, transitionTime: ${transitionTime}) request from ${cd.displayName}"
+		
+	if (cd.hasCapability("FanControl") ) {
+			setSpeed(cd:cd, level:level, speed:levelToSpeed(level as Integer))
+		} else { 
+			setLevel(level:level, duration:transitionTime, cd:cd) 
+		}
 }
 
 void componentStartLevelChange(com.hubitat.app.DeviceWrapper cd, direction) {
@@ -1050,11 +1055,26 @@ void componentStopLevelChange(com.hubitat.app.DeviceWrapper cd) {
 
 void componentSetSpeed(com.hubitat.app.DeviceWrapper cd, speed) {
     if (logEnable) log.info "Device ${device.displayName}: received componentSetSpeed(${speed}) request from ${cd.displayName}"
+	if (speed == "auto")
+	{
+		log.info "Device ${device.displayName}: Auto Speed has no effect in this driver!"
+		return
+	}
 	setSpeed(speed:speed, cd:cd)
 }
 
+void componentCycleSpeed(com.hubitat.app.DeviceWrapper cd) {
+   log.info "Device ${device.displayName}: Cycle Speed function has no effect in this driver!"
+
+}
+
+
 String levelToSpeed(Integer level)
 {
+	log.debug "Function levelToSpeed( ${level})"
+// 	Map speeds = [(0..0):"off", (1..20):"low", (21..40):"medium-low", (41-60):"medium", (61..80):"medium-high", (81..100):"high"]
+//	return (speeds.find{ key, value -> key.contains(level) }).value
+
 	switch (level)
 	{
 	case 0 :
@@ -1076,9 +1096,15 @@ String levelToSpeed(Integer level)
 		return "high"
 		break
 	}
+
 }
+
+Integer speedToLevel(String speed) {
+	return ["off": 0, "low":20, "medium-low":40, "medium":60, "medium-high":80, "high":100].get(speed)
+}
+
 void setSpeed(speed, com.hubitat.app.DeviceWrapper cd = null ) { setSpeed(speed:speed, cd:cd) }
-void setSpeed(Map params = [speed: "on" , cd: null ])
+void setSpeed(Map params = [speed: "on" , level: null , cd: null ])
 {
 	com.hubitat.app.DeviceWrapper targetDevice = params.cd ?: device
 	Short ep = params.cd ? (targetDevice.deviceNetworkId.split("-ep")[-1] as Short) : null
@@ -1087,17 +1113,17 @@ void setSpeed(Map params = [speed: "on" , cd: null ])
 
 	
 	String newSpeed = params.speed
-	Integer level
+	Integer targetLevel= params.level.is( null ) ? speedToLevel(newSpeed) : params.level
 	
 	 if (newSpeed == "on")
 	 {
 	 	targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} switch set to off", type: "digital")
 		
-		level = targetDevice.currentValue("level")
+		targetLevel = targetDevice.currentValue("level")
 		
-		targetDevice.sendEvent(name: "level", value: level , descriptionText: "Device ${targetDevice.displayName} level set to ${newLevel}", type: "digital")
-		
-		targetDevice.sendEvent(name: "speed", value: levelToSpeed(level) , descriptionText: "Device ${targetDevice.displayName} level set to ${levelToSpeed(level)}", type: "digital")
+		targetDevice.sendEvent(name: "level", value: targetLevel , descriptionText: "Device ${targetDevice.displayName} level set to ${targetLevel}", type: "digital")
+		// targetDevice.sendEvent(name: "speed", value: "on" , descriptionText: "Device ${targetDevice.displayName} turned on", type: "digital")		
+		targetDevice.sendEvent(name: "speed", value: levelToSpeed(targetLevel) , descriptionText: "Device ${targetDevice.displayName} speed set to ${levelToSpeed(targetLevel)}", type: "digital")
 
 	 } else if (newSpeed == "off")
 	 { 
@@ -1105,13 +1131,12 @@ void setSpeed(Map params = [speed: "on" , cd: null ])
 		
 		targetDevice.sendEvent(name: "speed", value: "off", descriptionText: "Device ${targetDevice.displayName} speed set to off", type: "digital")	 
 	 } else {
-	 	level = ["low":20, "medium-low":40, "medium":60, "medium-high":80, "high":99].get(newSpeed)
-		
+
 		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device ${targetDevice.displayName} switch set to on", type: "digital")
 		
 		targetDevice.sendEvent(name: "speed", value: newSpeed, descriptionText: "Device ${targetDevice.displayName} speed set to ${newSpeed}", type: "digital")
 		
-		targetDevice.sendEvent(name: "level", value: level, descriptionText: "Device ${targetDevice.displayName} level set to ${level}", type: "digital")
+		targetDevice.sendEvent(name: "level", value: targetLevel, descriptionText: "Device ${targetDevice.displayName} level set to ${targetLevel}", type: "digital")
 	 }
 
 }
