@@ -23,7 +23,7 @@ metadata {
 		capability "DoubleTapableButton"
 		command "doubleTap", ["NUMBER"]
 
-        attribute "buttoonTripleTapped", "number"	
+        attribute "buttonTripleTapped", "number"	
 		attribute "buttonFourTaps", "number"	
 		attribute "buttonFiveTaps", "number"	         
 		attribute "multiTapButton", "number"	
@@ -1055,19 +1055,8 @@ void componentStopLevelChange(com.hubitat.app.DeviceWrapper cd) {
 
 void componentSetSpeed(com.hubitat.app.DeviceWrapper cd, speed) {
     if (logEnable) log.info "Device ${device.displayName}: received componentSetSpeed(${speed}) request from ${cd.displayName}"
-	if (speed == "auto")
-	{
-		log.info "Device ${device.displayName}: Auto Speed has no effect in this driver!"
-		return
-	}
 	setSpeed(speed:speed, cd:cd)
 }
-
-void componentCycleSpeed(com.hubitat.app.DeviceWrapper cd) {
-   log.info "Device ${device.displayName}: Cycle Speed function has no effect in this driver!"
-
-}
-
 
 String levelToSpeed(Integer level)
 {
@@ -1445,6 +1434,11 @@ void stopLevelChange(cd = null ){
 ///////////////                  Central Scene Processing          ////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
+// Use a concurrentHashMap to hold the last reported state. This is used for "held" state checking
+// In a "held" state, the device will send "held down refresh" messages at either 200 mSecond or 55 second intervals.
+// Hubitat should not generated repreated "held" messages in response to a refresh, so inhibit those
+// Since the concurrentHashMap is @Field static -- its data structure is common to all devices using this
+// Driver, therefore you have to key it using the device.deviceNetworkId to get the value for a particuarl device.
 @Field static  ConcurrentHashMap centralSceneButtonState = new ConcurrentHashMap<String, String>()
 
 String getCentralSceneButtonState(Integer button) { 
@@ -1459,37 +1453,39 @@ String setCentralSceneButtonState(Integer button, String state) {
 }
 
 void getCentralSceneInfo() {
+	// Not currently used.
 	sendToDevice(zwave.centralSceneV3.centralSceneSupportedGet() )
 }
 
 void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneNotification cmd)
 {
+
+	// Check if central scene is already in a held state, if so, and you get another held message, its a refresh, so don't send a sendEvent
 	if ((getCentralSceneButtonState(cmd.sceneNumber as Integer) == "held") && (cmd.keyAttributes == 2)) return
 
+	// Central scene events should be sent with isStateChange:true since it is valid to send two of the same events in a row (except held, whcih is handled in previous line)
     Map event = [value:cmd.sceneNumber, type:"physical", unit:"button#", isStateChange:true]
 	
 	event.name = [	0:"pushed", 1:"released", 2:"held",  3:"doubleTapped", 
-					4:"buttoonTripleTapped", 5:"buttonFourTaps", 6:"buttonFiveTaps"].get(cmd.keyAttributes as Integer)
+					4:"buttonTripleTapped", 5:"buttonFourTaps", 6:"buttonFiveTaps"].get(cmd.keyAttributes as Integer)
 	
 	String tapDescription = [	0:"Pushed", 1:"Released", 2:"Held",  3:"Double-Tapped", 
 								4:"Three Taps", 5:"Four Taps", 6:"Five Taps"].get(cmd.keyAttributes as Integer)
     
+	// Save the event name for event that is about to be sent using sendEvent. This is important for 'held' state refresh checking
 	setCentralSceneButtonState(cmd.sceneNumber, event.name)	
 	
 	event.descriptionText="${device.displayName}: Button #${cmd.sceneNumber}: ${tapDescription}"
-	
-	log.debug "Central Scene Event is: ${event}."
 
-	sendEvent(event)
+	if (device.hasAttribute( event.name )) sendEvent(event)
 	
 	// Next code is for the custom attribute "multiTapButton".
 	Integer taps = [0:1, 3:2, 4:3, 5:4, 6:5].get(cmd.keyAttributes as Integer)
-	if ( taps )
+	if ( taps && device.hasAttribute("multiTapButton") )
 	{
 		event.name = "multiTapButton"
 		event.unit = "Button #.Tap Count"
 		event.value = ("${cmd.sceneNumber}.${taps}" as Float)
-		log.debug "multitap event is: ${event}."
 		sendEvent(event)		
 	} 
 }
