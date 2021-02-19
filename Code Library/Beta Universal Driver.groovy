@@ -976,8 +976,13 @@ void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCmdEncap cmd)
 
 ////    Z-Wave Message Parsing   ////
 void parse(String description) {
-	hubitat.zwave.Command cmd = zwave.parse(description, defaultParseMap)
-    if (cmd) { zwaveEvent(cmd) }
+	try {
+		hubitat.zwave.Command cmd = zwave.parse(description, defaultParseMap)
+		if (cmd) { zwaveEvent(cmd) }
+	}
+	catch (ex) {
+		log.error "Device ${device.displayName}: Error in parse() attempting to parse input: ${description}. \nError: ${ex}. \nStack trace is: ${getStackTrace(ex)}.\nException message is ${getExceptionMessageWithLine(ex)}. \nParse map is: ${defaultParseMap}."
+	}
 }
 
 ////    Z-Wave Message Sending to Hub  ////
@@ -1148,7 +1153,7 @@ void setSpeed(Map params = [speed: null , level: null , cd: null ])
 		sendZwaveValue(value: 0, duration: 0, ep: ep)
 		
 	} else {
-		targetLevel = speedToLevel(params.speed) ?: params.level ?: currentLevel
+		targetLevel = (params.level as Integer) ?: speedToLevel(params.speed) ?: currentLevel
 
 		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Fan turned on", type: "digital")
 
