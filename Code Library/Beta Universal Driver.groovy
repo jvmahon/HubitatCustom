@@ -1,8 +1,6 @@
 import java.util.concurrent.* // Available (white-listed) concurrency classes: ConcurrentHashMap, ConcurrentLinkedQueue, Semaphore, SynchronousQueue
 import groovy.transform.Field
 
-
-
 metadata {
 	definition (name: "[Beta Version 0.8] Dimmer Driver Using Universal Codebase",namespace: "jvm", author: "jvm") {
 		capability "Configuration"
@@ -31,7 +29,11 @@ metadata {
 		attribute "buttonFourTaps", "number"	
 		attribute "buttonFiveTaps", "number"	         
 		attribute "multiTapButton", "number"	
-
+		
+		command "setParameter",[[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],
+					[name:"value",type:"NUMBER", description:"Parameter Value", constraints:["NUMBER"]]
+					]	
+		
 		// command "preCacheReports"
 		// command "getCachedVersionReport"
 		// command "getCachedNotificationSupportedReport"
@@ -537,7 +539,7 @@ hubitat.zwave.Command  getCachedProtectionSupportedReport(Short ep = null ) {
 								
 hubitat.zwave.Command  getCachedSwitchMultilevelSupportedReport(Short ep = null ) { 
 								if (implementsZwaveClass(0x26, ep) < 3) return null
-								getReportCachedByProductId(zwave.switchMultilevelV3.switchMultilevelSupportedGet(), ep) 
+								getReportCachedByProductId(zwave.switchMultilevelV4.switchMultilevelSupportedGet(), ep) 
 							}
 
 hubitat.zwave.Command  getCachedSensorMultilevelSupportedSensorReport(Short ep = null ) { 
@@ -740,7 +742,7 @@ void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelEndPointReport
 void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationSupportedReport cmd, ep = null )    	 			{ transferReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.notificationv8.EventSupportedReport cmd, ep = null )    	 					{ transferReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.protectionv2.ProtectionSupportedReport  cmd, ep = null )   					{ transferReport(cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelSupportedReport  cmd, ep = null )   		{ transferReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelSupportedReport  cmd, ep = null )   		{ transferReport(cmd, ep) }
 void zwaveEvent(hubitat.zwave.commands.sensormultilevelv11.SensorMultilevelSupportedSensorReport  cmd, ep = null ) 	{ transferReport(cmd, ep) }		
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd, ep = null )  									{ transferReport(cmd, ep) }
 Boolean transferReport(cmd, ep)
@@ -909,7 +911,7 @@ Map getDefaultParseMap()
 return [
 	0x20:2, // Basic Set
 	0x25:2, // Switch Binary
-	0x26:3, // Switch MultiLevel 
+	0x26:4, // Switch MultiLevel 
 	0x31:11, // Sensor MultiLevel
 	0x32:5, // Meter
 	0x5B:3,	// Central Scene
@@ -999,7 +1001,7 @@ void sendZwaveValue(Map params = [value: null , duration: null , ep: null ] )
 	}
 	
 	if (implementsZwaveClass(0x26, params.ep)) { // Multilevel  type device
-		sendSupervised(zwave.switchMultilevelV3.switchMultilevelSet(value: newValue, dimmingDuration:params.duration as Short), params.ep)	
+		sendSupervised(zwave.switchMultilevelV4.switchMultilevelSet(value: newValue, dimmingDuration:params.duration as Short), params.ep)	
 	} else if (implementsZwaveClass(0x25, params.ep)) { // Switch Binary Type device
 		sendSupervised(zwave.switchBinaryV1.switchBinarySet(switchValue: newValue ), params.ep)
 	} else if (implementsZwaveClass(0x20, params.ep)) { // Basic Set Type device
@@ -1250,7 +1252,7 @@ void zwaveEvent(hubitat.zwave.commands.switchbinaryv2.SwitchBinaryReport cmd, ep
 	}
 }
 
-void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelReport cmd, Short ep = null)
+void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelReport cmd, Short ep = null)
 {
 	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
 
@@ -1271,13 +1273,14 @@ void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelReport
 		}
 		targetDevice.sendEvent( name: "windowShade", value: positionDescription, descriptionText: "Window Shade position set.", type: "physical" )	
 	}
+
 	if (targetDevice.hasAttribute("level") || targetDevice.hasAttribute("switch") ) // Switch or a fan
 	{
 		Integer targetLevel = 0
 
-		if (cmd.hasProperty("targetValue") && cmd.hasProperty("duration") && (! cmd?.targetValue.is( null ) ) && ((cmd?.duration as Short) > (0 as Short))) //  Consider duration and target, but only when both are present and in transition with duration > 0 
+		if (cmd.hasProperty("targetValue")) //  Consider duration and target, but only when both are present and in transition with duration > 0 
 		{
-			targetLevel = cmd.targetValue
+			targetLevel = cmd.targetValue ?: cmd.value
 		} else {
 			targetLevel = cmd.value
 		}
@@ -1288,12 +1291,16 @@ void zwaveEvent(hubitat.zwave.commands.switchmultilevelv3.SwitchMultilevelReport
 
 		if ((targetLevel == 99) && (priorLevel == 100)) targetLevel = 100
 
-		if (priorSwitchState != newSwitchState)
+		if (targetDevice.hasAttribute("switch") && (priorSwitchState != newSwitchState))
 		{
 			targetDevice.sendEvent(	name: "switch", value: newSwitchState, descriptionText: "Switch state set", type: "physical" )
 			if (txtEnable) log.info "Device ${targetDevice.displayName} set to ${newSwitchState}."
 		}
-		if (targetLevel != 0 ) // Only handle on values 1-99 here. If device was turned off, that would be handle in the switch state block above.
+		if (targetDevice.hasAttribute("speed")) 
+		{
+			targetDevice.sendEvent( name: "speed", value: levelToSpeed(targetLevel), descriptionText: "Speed set", type: "physical" )
+		}
+		if (targetDevice.hasAttribute("level") && (targetLevel != 0 )) // Only handle on values 1-99 here. If device was turned off, that would be handle in the switch state block above.
 		{
 			// Don't send the event if the level doesn't change except if transitioning from off to on, always send!
 			if ((priorLevel != targetLevel) || (priorSwitchState != newSwitchState))
@@ -1358,14 +1365,14 @@ void startLevelChange(direction, cd = null ){
 	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
     Integer upDown = (direction == "down" ? 1 : 0)
-    sendSupervised(zwave.switchMultilevelV3.switchMultilevelStartLevelChange(upDown: upDown, ignoreStartLevel: 1, startLevel: 0), ep)
+    sendSupervised(zwave.switchMultilevelV4.switchMultilevelStartLevelChange(upDown: upDown, ignoreStartLevel: 1, startLevel: 0), ep)
 }
 
 void stopLevelChange(cd = null ){
 	com.hubitat.app.DeviceWrapper targetDevice = (cd ? cd : device)
 	Short ep = cd ? (cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
-	sendSupervised(zwave.switchMultilevelV3.switchMultilevelStopLevelChange(), ep)
+	sendSupervised(zwave.switchMultilevelV4.switchMultilevelStopLevelChange(), ep)
 	sendToDevice(zwave.basicV1.basicGet(), ep)
 
 }
@@ -1702,6 +1709,9 @@ void processPendingChanges()
 	}
 }
 
+void setParameter(parameterNumber,value) {
+	setParameter(parameterNumber:parameterNumber, value:value)
+}
 void setParameter(Map params = [parameterNumber: null , value: null ] ){
     if (params.parameterNumber.is( null ) || params.value.is( null ) ) {
 		log.warn "Device ${device.displayName}: Can't set parameter ${parameterNumber}, Incomplete parameter list supplied... syntax: setParameter(parameterNumber,size,value), received: setParameter(${parameterNumber}, ${size}, ${value})."
@@ -1719,6 +1729,11 @@ void setParameter(Map params = [parameterNumber: null , value: null ] ){
 		{
 			if ((report.scaledConfigurationValue) == (params.value as BigInteger)) {
 				log.info "Device ${device.displayName}: Successfully set parameter #: ${params.parameterNumber} to value ${params.value}."
+
+				String configName = "configParam${"${report.parameterNumber}".padLeft(3,"0")}"
+				if (logEnable) log.debug "Device ${device.displayName}: updating settings data for ${configName} to new value ${report.scaledConfigurationValue}!"
+				device.updateSetting("${configName}", report.scaledConfigurationValue as Integer)				
+	
 			} else {
 				log.warn "Device ${device.displayName}: Failed to set parameter #: ${params.parameterNumber} to value ${params.value}. Value of parameter is set to ${report.scaledConfigurationValue} instead."
 			}
