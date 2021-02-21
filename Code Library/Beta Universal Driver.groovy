@@ -2,7 +2,7 @@ import java.util.concurrent.* // Available (white-listed) concurrency classes: C
 import groovy.transform.Field
 
 metadata {
-	definition (name: "[Beta Version 0.8] Dimmer Driver Using Universal Codebase",namespace: "jvm", author: "jvm") {
+	definition (name: "[Release Candidate 0.8] Dimmer Driver Using Universal Codebase",namespace: "jvm", author: "jvm") {
 		capability "Configuration"
 		capability "Initialize"
 		capability "Refresh"
@@ -124,7 +124,7 @@ void initialize( )
 	if (txtEnable) log.info "Device ${device.displayName}: Getting parameter values from device."
 	setInputControlParameterValuesToDeviceValue()
 	if (txtEnable) log.info "Device ${device.displayName}: Initialization complete."
-	
+	refresh()
 }
 
 void refresh(Map params = [cd: null ])
@@ -144,74 +144,6 @@ void refresh(Map params = [cd: null ])
 	meterRefresh( ep )
 }
 
-/////////////////////////////////////////////////////////////////////////
-//////        Create and Manage Child Devices for Endpoints       ///////
-/////////////////////////////////////////////////////////////////////////
-
-void deleteUnwantedChildDevices()
-{	
-	hubitat.zwave.Command endPointReport = getCachedMultiChannelEndPointReport()
-	if (!endPointReport) return
-	
-	Short numberOfEndPoints = endPointReport.endPoints
-	
-	// Delete child devices that don't use the proper network ID form (parent ID, followed by "-ep" followed by endpoint number).
-	getChildDevices()?.each
-	{ child ->	
-	
-		List childNetIdComponents = child.deviceNetworkId.split("-ep")
-                    
-		if (childNetIdComponents.size() != 2) {
-			deleteChildDevice(child.deviceNetworkId)			
-			
-		} else {
-            Boolean endPointInRange = ((0 as Short) < (childNetIdComponents[1] as Short)) && ((childNetIdComponents[1] as Short) <= numberOfEndPoints)
-			Boolean parentNetIdMatches = (childNetIdComponents[0]  == device.deviceNetworkId)
-			
-            if (!(parentNetIdMatches && endPointInRange )) {
-				deleteChildDevice(child.deviceNetworkId)	
-			}
-		}
-	}
-}
-
-void createChildDevices()
-{	
-	Integer mfr = 	device.getDataValue("manufacturer").toInteger()
-	Integer type = 	device.getDataValue("deviceType").toInteger()
-	Integer id = 	device.getDataValue("deviceId").toInteger()
-	
-	hubitat.zwave.Command endPointReport = getCachedMultiChannelEndPointReport()
-	if (!endPointReport) return
-	
-	Short numberOfEndPoints = endPointReport.endPoints
-	
-	Short thisKid = 1
-	for ( thisKid; thisKid <= numberOfEndPoints; thisKid++)
-	{
-		String childNetworkId = "${device.deviceNetworkId}-ep${"${thisKid}".padLeft(3, "0") }"
-		com.hubitat.app.DeviceWrapper cd = getChildDevice(childNetworkId)
-
-		if (cd.is( null )) {
-			log.info "Device ${device.displayName}: creating child device: ${childNetworkId}"
-			String childDriver
-			
-			if (implementsZwaveClass(0x25, thisKid ) ){  // Binary Switch
-				if (implementsZwaveClass(0x32, thisKid ) ){ // Meter Supported
-					childDriver = "Generic Component Metering Switch"
-				} else {
-					childDriver = "Generic Component Switch"
-				}
-			} else  if (implementsZwaveClass(0x26, thisKid ) ){ // MultiLevel Switch
-				childDriver = "Generic Component Dimmer"
-			}
-
-			addChildDevice("hubitat", childDriver, childNetworkId, [name: "${device.displayName}-ep${thisKid}", isComponent: false])
-		} else {
-			log.info "Device ${device.displayName}: Child device with network id ${childNetworkId} already exist. No need to re-create."
-		}
-	}
-}
 
 //////////////////////////////////////////////////////////////
 //////                  Manage Metering                ///////
@@ -502,526 +434,9 @@ void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd, ep
 }
 
 
-//////////////////////////////////////////////////////////////////////
-//////        Report Pre-Caching Library Functions            ///////
-////////////////////////////////////////////////////////////////////// 
-
-hubitat.zwave.Command  getCachedVersionReport() { 
-								getReportCachedByNetworkId(zwave.versionV1.versionGet(), null )
-							}
-								
-hubitat.zwave.Command  getCachedNotificationSupportedReport(Short ep = null ) { 
-								if (implementsZwaveClass(0x71, ep) < 2) return null
-								getReportCachedByProductId(zwave.notificationV8.notificationSupportedGet(), ep)
-							}
-								
-hubitat.zwave.Command  getCachedMultiChannelEndPointReport() { 
-								getReportCachedByProductId(zwave.multiChannelV4.multiChannelEndPointGet(), null )
-							}
-								
-hubitat.zwave.Command  getCachedMultiChannelCapabilityReport(Short ep)  { 
-								getReportCachedByProductId(zwave.multiChannelV4.multiChannelCapabilityGet(endPoint: ep), null )
-							}
-								
-hubitat.zwave.Command  getCachedCentralSceneSupportedReport() { 
-								getReportCachedByProductId(zwave.centralSceneV3.centralSceneSupportedGet(), null ) 
-							}
-								
-hubitat.zwave.Command  getCachedMeterSupportedReport(Short ep = null ) { 
-								if (implementsZwaveClass(0x32, ep) < 2) return null
-								getReportCachedByProductId(zwave.meterV5.meterSupportedGet(), ep) 
-							}
-														
-hubitat.zwave.Command  getCachedProtectionSupportedReport(Short ep = null ) { 
-								if (implementsZwaveClass(0x75, ep) < 2) return null
-								getReportCachedByProductId(zwave.protectionV2.protectionSupportedGet(), ep) 
-							}
-								
-hubitat.zwave.Command  getCachedSwitchMultilevelSupportedReport(Short ep = null ) { 
-								if (implementsZwaveClass(0x26, ep) < 3) return null
-								getReportCachedByProductId(zwave.switchMultilevelV4.switchMultilevelSupportedGet(), ep) 
-							}
-
-hubitat.zwave.Command  getCachedSensorMultilevelSupportedSensorReport(Short ep = null ) { 
-								if (implementsZwaveClass(0x31, ep) < 5) return null
-								getReportCachedByProductId(zwave.sensorMultilevelV11.sensorMultilevelSupportedGetSensor(), ep) 
-							}
-
-// =============================================
-void preCacheReports()
-{
-		getCachedVersionReport() 										
-
-		List<Short> 	deviceClasses = getDataValue("inClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Short }
-						deviceClasses += getDataValue("secureInClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Short }
-		
-		deviceClasses.each{ it ->  implementsZwaveClass(it) }
-		
-		getCachedCentralSceneSupportedReport()		
-		getCachedNotificationSupportedReport()										
-		getCachedMeterSupportedReport()																		
-		getCachedProtectionSupportedReport()										
-		getCachedSwitchMultilevelSupportedReport()				
-		getCachedSensorMultilevelSupportedSensorReport()	
-		
-		if (implementsZwaveClass(0x60))
-		{
-			hubitat.zwave.Command endPointReport = getCachedMultiChannelEndPointReport()
-			for (Short endPoint = 1; endPoint < (endPointReport.endPoints as Short); endPoint++)
-			{
-				hubitat.zwave.Command report = getCachedMultiChannelCapabilityReport(endPoint as Short)
-				getCachedNotificationSupportedReport(endPoint)										
-				getCachedMeterSupportedReport(endPoint)																		
-				getCachedProtectionSupportedReport(endPoint)										
-				getCachedSwitchMultilevelSupportedReport(endPoint)				
-				getCachedSensorMultilevelSupportedSensorReport(endPoint)			
-			}
-		}
-}
 
 
-@Field static ConcurrentHashMap<String, ConcurrentHashMap> reportsCachedByProductId = new ConcurrentHashMap<String, ConcurrentHashMap>(32)
-@Field static ConcurrentHashMap<String, ConcurrentHashMap> reportsCachedByNetworkId = new ConcurrentHashMap<String, ConcurrentHashMap>(64)
-@Field static reportQueues = new ConcurrentHashMap<String, ConcurrentHashMap>()
 
-SynchronousQueue myReportQueue(String reportClass)
-{
-	ConcurrentHashMap thisDeviceQueues = reportQueues.get(device.deviceNetworkId, new ConcurrentHashMap<String,SynchronousQueue>())
-	SynchronousQueue thisReportQueue = thisDeviceQueues.get(reportClass, new SynchronousQueue())
-	return thisReportQueue
-}
-
-///   Functions to generate keys used to access the concurrent Hash Maps and to store into the hash maps ///
-Integer getManufacturerNumber() { device.getDataValue("manufacturer").toInteger() }
-Integer getDeviceTypeNumber() { device.getDataValue("deviceType").toInteger() }
-Integer getDeviceIdNumber() {device.getDataValue("deviceId").toInteger() }
-
-String getManufacturerHexString() { return hubitat.helper.HexUtils.integerToHexString( getManufacturerNumber(), 2) }
-String getDeviceTypeHexString() { return hubitat.helper.HexUtils.integerToHexString( getDeviceTypeNumber(), 2) }
-String getDeviceIdHexString() { return hubitat.helper.HexUtils.integerToHexString( getDeviceIdNumber(), 2) }
-
-String productKey() // Generates a key based on manufacturer / device / firmware. Data is shared among all similar end-devices.
-{
-	if (remindEnable) log.warn "productKey function should be updated with a hash based on inclusters as some devices may remove change their inclusters depending on pairing state. for example, Zooz Zen 18 motion sensor may or may not show with a battery!"
-	
-	String key = "${getManufacturerHexString()}:${getDeviceTypeHexString()}:${getDeviceIdHexString()}:"
-	return key
-}
-
-String firmwareKey(String firmwareReport)
-{
-	hubitat.zwave.Command   versionReport = getCachedVersionReport() 
-	if (!versionReport)  {
-			log.warn "Device ${device.displayName} called firmwareKey function but firmware version is not cached! Device may not be operating correctly. Returning null."
-			return null
-		}
-	return productKey() + versionReport?.format()
-}
-
-///////////////////////////////////////////
-@Field static ConcurrentHashMap<String, ConcurrentHashMap> CommandClassVersionReportsByProductID = new ConcurrentHashMap<String, ConcurrentHashMap>(32)
-
-hubitat.zwave.Command  getCachedVersionCommandClassReport(Short requestedCommandClass)		
-{
-	ConcurrentHashMap ClassReports = CommandClassVersionReportsByProductID.get(firmwareKey(), new ConcurrentHashMap<Short,ConcurrentHashMap>())
-
-	hubitat.zwave.Command cmd = ClassReports?.get(requestedCommandClass)
-	
-	if (cmd) { 
-		return cmd
-	} else {
-		sendToDevice(zwave.versionV1.versionCommandClassGet(requestedCommandClass: requestedCommandClass ))
-		cmd = myReportQueue("8614").poll(10, TimeUnit.SECONDS)
-		if(cmd.is( null ) ) {log.warn "Device ${device.displayName}: failed to retrieve a requested command class ${requestedCommandClass}."; return null }
-		ClassReports.put(cmd.requestedCommandClass, cmd)
-	}
-	return ClassReports?.get(requestedCommandClass)
-}
-
-void zwaveEvent(hubitat.zwave.commands.versionv3.VersionCommandClassReport cmd, ep = null ) { myReportQueue(cmd.CMD).offer(cmd) }
-///////////////////////////////////////////
-/*
-String reportHexStringToCommandHexString(String reportClass)
-{
-	Integer getCommandNumber = hubitat.helper.HexUtils.hexStringToInt(reportClass) - 1
-	return hubitat.helper.HexUtils.integerToHexString(getCommandNumber, 2)
-}
-*/
-String commandHexStringToReportHexString(String commandClass)
-{
-	Integer getReportNumber = hubitat.helper.HexUtils.hexStringToInt(commandClass) + 1
-	return hubitat.helper.HexUtils.integerToHexString(getReportNumber, 2)
-}
-
-
-hubitat.zwave.Command   getReportCachedByNetworkId(Map options = [:], hubitat.zwave.Command getCmd, ep )  
-{
-	ConcurrentHashMap cacheForThisNetId = reportsCachedByNetworkId.get(device.deviceNetworkId, new ConcurrentHashMap<String,SynchronousQueue>())
-	ConcurrentHashMap cacheForThisEndpoint = cacheForThisNetId?.get((ep ?: 0) as Short, new ConcurrentHashMap<String,Object>() )	
-	
-	String reportClass = commandHexStringToReportHexString(getCmd.CMD)		
-	hubitat.zwave.Command cmd = cacheForThisEndpoint?.get(reportClass)
-	
-	if (cmd) { 
-		return cmd
-		// runInMillis(10, replayCommand, [overwrite:false, data: [cachedVersionReport, ep ] ] )
-	} else {
-		Map transferredData;
-		while( transferredData.is (null ) )
-		{
-			sendToDevice(getCmd, ep)
-			transferredData = myReportQueue(reportClass).poll(10, TimeUnit.SECONDS)
-		}
-		cmd =  transferredData.report
-		cacheForThisEndpoint.put(cmd.CMD, cmd)
-	}
-	return cacheForThisEndpoint?.get(reportClass)
-}
-
-
-hubitat.zwave.Command   getReportCachedByProductId(Map options = [:], hubitat.zwave.Command getCmd, Short ep)  
-{
-	if (!implementsZwaveClass(getCmd.commandClassId, ep))
-		{
-			// if (logEnable) log.debug "Command class ${getCmd.commandClassId} not implemented by this device for endpoint ${ep ?: 0}: " + getCmd
-			return null
-		}
-	Short subIndex
-	switch (getCmd.CMD)
-	{
-		case "6009": // This get request carries the endPoint within the message, so use that to key the storage array
-			subIndex = getCmd.endPoint
-			break
-		default :
-			subIndex = ep ?: 0
-			break
-	}
-	ConcurrentHashMap cacheForThisProductId = reportsCachedByProductId.get(firmwareKey(), new ConcurrentHashMap<String,SynchronousQueue>())
-	ConcurrentHashMap cacheForThisSubIndex = cacheForThisProductId?.get(subIndex, new ConcurrentHashMap<String,Object>() )	
-
-	String reportClass = commandHexStringToReportHexString(getCmd.CMD)
-	hubitat.zwave.Command cmd = cacheForThisSubIndex?.get(reportClass)
-	
-	if (cmd) { 
-		return cmd
-		// if (logEnable) log.debug "Device ${device.displayName}: In function getReportCachedByProductId, getting report using command ${getCmd} for endpoint ${ep}."
-	} else {
-		// if (logEnable) log.debug "Device ${device.displayName}: sending to device a command : ${getCmd} to get report ${reportClass} for subIndex ${subIndex}."
-		sendToDevice(getCmd, ep)
-		Map transferredData = myReportQueue(reportClass).poll(10, TimeUnit.SECONDS)
-		// if (logEnable) log.debug "Device ${device.displayName}: Transferred data for report ${getCmd} is: " + transferredData
-		cmd =  transferredData.report
-		cacheForThisSubIndex.put(cmd.CMD, cmd)
-	}
-	return cacheForThisSubIndex?.get(reportClass)
-}
-
-void replayCommand(params)
-{
-    Short commandClass =  (params[0].commandClassId) as Short
-    Short command =       (params[0].commandId) as Short
-    List<Short> payload = (params[0].payload)
-    Short ep = params[1]
-    
-    zwaveEvent(zwave.getCommand(commandClass, command, payload) , ep)
-}
-
-void logStoredReportCache()
-{
-	log.debug "report cache for items stored based on ProductId and firmware version is: " + reportsCachedByProductId
-	log.debug "reportsCachedByNetworkId stored based on NetworkId is: " + reportsCachedByNetworkId
-	log.debug "CommandClassVersionReportsByProductID is: " + CommandClassVersionReportsByProductID
-	log.debug "OpenSmartHouseRecords are: " + OpenSmartHouseRecords
-}
-
-/////////////////  Caching Functions To return Reports! //////////////////////////////
-
-void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneSupportedReport  cmd, ep = null )  				{ transferReport(cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.meterv5.MeterSupportedReport cmd, ep = null ) 								{ transferReport(cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelEndPointReport  cmd, ep = null )  				{ transferReport(cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationSupportedReport cmd, ep = null )    	 			{ transferReport(cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.notificationv8.EventSupportedReport cmd, ep = null )    	 					{ transferReport(cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.protectionv2.ProtectionSupportedReport  cmd, ep = null )   					{ transferReport(cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelSupportedReport  cmd, ep = null )   		{ transferReport(cmd, ep) }
-void zwaveEvent(hubitat.zwave.commands.sensormultilevelv11.SensorMultilevelSupportedSensorReport  cmd, ep = null ) 	{ transferReport(cmd, ep) }		
-void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd, ep = null )  									{ transferReport(cmd, ep) }
-Boolean transferReport(cmd, ep)
-{ 	
-	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
-
-	Boolean transferredReport = myReportQueue(cmd.CMD).offer([report:cmd, endPoint:ep])
-	if (!transferredReport) { log.warn "Device ${targetDevice.displayName}: Failed to transfer version report for command ${cmd}." }
-}
-
-void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCapabilityReport  cmd)
-{ 
-	// This requires special processing. Endpoint is in the message, not passed as a parameter, but want to store it based on endpoint!
-	Boolean transferredReport = myReportQueue(cmd.CMD).offer([report:cmd, endPoint:cmd.endPoint])
-	if (!transferredReport) { log.warn "Device ${device.displayName}: Failed to transfer version report for command ${cmd}." }
-}
-
-List <Short> getNotificationSupportedReportsAsList(Short ep = null ) 	
-{ 
-	hubitat.zwave.Command  report = getCachedNotificationSupportedReport(ep)
-	
-	List<Short> notificationTypes =[]
-		if (report.smoke)				notificationTypes << 1 // Smoke
-		if (report.co)					notificationTypes << 2 // CO
-		if (report.co2)					notificationTypes << 3 // CO2
-		if (report.heat)				notificationTypes << 4 // Heat
-		if (report.water)				notificationTypes << 5 // Water
-		if (report.accessControl) 		notificationTypes << 6 // Access Control
-		if (report.burglar)				notificationTypes << 7 // Burglar
-		if (report.powerManagement)		notificationTypes << 8 // Power Management
-		if (report.system)				notificationTypes << 9 // System
-		if (report.emergency)			notificationTypes << 10 // Emergency Alarm
-		if (report.clock)				notificationTypes << 11 // Clock
-		if (report.appliance)			notificationTypes << 12 // Appliance
-		if (report.homeHealth)			notificationTypes << 13 // Home Health
-		if (report.siren)				notificationTypes << 14 // Siren
-		if (report.waterValve)			notificationTypes << 15 // Water Valve
-		if (report.weatherAlarm)		notificationTypes << 16 // Weather Alarm
-		if (report.irrigation)			notificationTypes << 17 // Irrigation
-		if (report.gasAlarm)			notificationTypes << 18 // Gas Alarm
-		if (report.pestControl)			notificationTypes << 19 // Pest Control
-		if (report.lightSensor)			notificationTypes << 20 // Light Sensor
-		if (report.waterQuality)		notificationTypes << 21 // Water Quality
-		if (report.homeMonitoring)		notificationTypes << 22 // Home Monitoring
-	return notificationTypes
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-Integer implementsZwaveClass(commandClass, ep = null ) {implementsZwaveClass(commandClass as Short, ep as Short )}
-Integer implementsZwaveClass(Short commandClass, Short ep = null )
-{
-	List<Short> deviceClasses = getDataValue("inClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Short }
-				deviceClasses += getDataValue("secureInClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Short }
-	if (ep ) 
-	{
-		Boolean supportsEndpoints = deviceClasses.contains(0x60 as Short)
-		Short numberOfEndPoints = getCachedMultiChannelEndPointReport().endPoints
-		
-		if (supportsEndpoints && (ep <= numberOfEndPoints))
-		{
-			if (getCachedMultiChannelCapabilityReport(ep)?.commandClass.contains(commandClass)) {
-				return getCachedVersionCommandClassReport(commandClass)?.commandClassVersion
-			} else {
-				return null
-			}
-		} else {
-			log.warn "Device ${device.displayName}: called function implementsZwaveClass(commandClass = ${commandClass}, ep = ${ep}). Maximum endpoints supported by this device is: ${numberOfEndPoints ? numberOfEndPoints : 0}" 
-			return null
-		}
-		
-	} else  if (deviceClasses.contains(commandClass)) {
-		Integer returnClassVersion = getCachedVersionCommandClassReport(commandClass)?.commandClassVersion
-		
-		if (! returnClassVersion) { 
-				log.warn "Device ${device.displayName}: In implementsZwaveClass function, Failed to retrieve a command class version for command class ${commandClass} even though class is supported. Forcing a return of 1."
-				returnClassVersion = 1 
-			} 
-		return returnClassVersion
-	} 
-	return null
-}
-		
-//////////////////////////////////////////////////////////////////////
-//////        Handle Supervision request and reports           ///////
-////////////////////////////////////////////////////////////////////// 
-@Field static ConcurrentHashMap<String, Short> supervisionSessionIDs = new ConcurrentHashMap<String, Short>()
-@Field static ConcurrentHashMap<String, Short> supervisionSentCommands = new ConcurrentHashMap<String, ConcurrentHashMap<Short, hubitat.zwave.Command>>()
-
-@Field static ConcurrentHashMap<String, ConcurrentHashMap> supervisionRejected = new ConcurrentHashMap<String, ConcurrentHashMap<String, Boolean>>()
-
-Boolean commandSupervisionNotSupported(hubitat.zwave.Command cmd) {	
-	Boolean previouslyRejected = ( supervisionRejected.get(firmwareKey())?.get(cmd.CMD) ) ? true : false 
-	if (logEnable && previouslyRejected) log.debug "Device ${device.displayName}: Attempted to supervise a class ${cmd.CMD} which was previously rejected as not supervisable."
-	return previouslyRejected 
-}
-
-void markSupervisionNotSupported(hubitat.zwave.Command cmd) {	
-log.debug "called markSupervisionNotSupported"
-	supervisionRejected.get(firmwareKey(), new ConcurrentHashMap<String, Boolean>() ).put(cmd.CMD, true )
-}
-
-def supervise(hubitat.zwave.Command command)
-{
-    if (superviseEnable && (!commandSupervisionNotSupported(command)) && implementsZwaveClass(0x6C))
-	{
-		// Get the next session ID mod 32, but if there is no stored session ID, initialize it with a random value.
-		Short nextSessionID = supervisionSessionIDs.get(device.getDeviceNetworkId() as String,((Math.random() * 32) % 32) as Short )
-		nextSessionID = (nextSessionID + 1) % 32 // increment and then mod with 32
-		supervisionSessionIDs.replace(device.getDeviceNetworkId(), nextSessionID)
-		
-		// Store the command that is being sent so that you can log.debug it out in case of failure!
-		supervisionSentCommands.get(device.getDeviceNetworkId() as String, new ConcurrentHashMap<Short, hubitat.zwave.Command>()).put(nextSessionID, command)
-
-		if (logEnable) log.debug "Supervising a command: ${command} with session ID: ${nextSessionID}."
-		return zwave.supervisionV1.supervisionGet(sessionID: nextSessionID, statusUpdates: false ).encapsulate(command)
-	} else {
-		return command
-	}
-}
-
-// This handles a supervised message (a "get") received from the Z-Wave device //
-void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd, Short ep = null ) {
-	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
-	
-    if (logEnable) log.debug "Received a SupervisionGet message from ${targetDevice.displayName}. The SupervisionGet message is: ${cmd}"
-
-    hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap, defaultParseMap)
-	
-    if (encapsulatedCommand) {
-        zwaveEvent(encapsulatedCommand, ep)
-    }
-    sendToDevice((new hubitat.zwave.commands.supervisionv1.SupervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0)), ep)
-}
-
-void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionReport cmd, ep = null ) {
-	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
-	
-	hubitat.zwave.Command whatWasSent = supervisionSentCommands?.get(device.getDeviceNetworkId() as String)?.get(cmd.sessionID)
-
-	switch (cmd.status)
-	{
-		case 0x00:
-			log.warn "Device ${targetDevice.displayName}: Z-Wave Command supervision not supported for: ${whatWasSent}. Re-sending without supervision."
-			markSupervisionNotSupported(whatWasSent)
-			sendToDevice(whatWasSent, ep )
-			break
-		case 0x01:
-			if (txtEnable) log.info "Device ${targetDevice.displayName}: Still processing command: ${whatWasSent}."
-		case 0x02:
-			log.warn "Device ${targetDevice.displayName}: Z-Wave supervised command reported failure. Failed command: ${whatWasSent}.Re-sending without supervision."
-			markSupervisionNotSupported(whatWasSent)
-			sendToDevice(whatWasSent, ep )
-			break
-		case 0xFF:
-			if (txtEnable) log.info "Device ${targetDevice.displayName}: Device successfully processed supervised command ${whatWasSent}."
-			break
-	}
-}
-
-//////////////////////////////////////////////////////////////////////
-//////                  Z-Wave Helper Functions                ///////
-//////   Format messages, Send to Device, secure Messages      ///////
-//////////////////////////////////////////////////////////////////////
-Map getDefaultParseMap()
-{
-return [
-	0x20:2, // Basic Set
-	0x25:2, // Switch Binary
-	0x26:4, // Switch MultiLevel 
-	0x31:11, // Sensor MultiLevel
-	0x32:5, // Meter
-	0x5B:3,	// Central Scene
-	0x60:4,	// MultiChannel
-	0x62:1,	// Door Lock
-	0x63:1,	// User Code
-	0x6C:1,	// Supervision
-	0x71:8, // Notification
-	0x80:1, // Battery
-	0x86:3,	// Version
-	0x98:1,	// Security
-	0x9B:2,	// Configuration
-	0x87:3  // Indicator
-	]
-}
-
-//// Catch Event Not Otherwise Handled! /////
-
-void zwaveEvent(hubitat.zwave.Command cmd, ep = null) {
-    log.debug "For ${device.displayName}, Received Z-Wave Message ${cmd} that is not handled by this driver. Endpoint: ${ep}. Message class: ${cmd.class}."
-}
-
-////    Security Encapsulation   ////
-void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) 
-{
-	hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand( parseMap, defaultParseMap )
-
-    if (encapsulatedCommand) {
-        zwaveEvent(encapsulatedCommand)
-    }
-}
-
-String secure(Integer cmd, Integer hexBytes = 2, ep = null ) { 
-    return secure(hubitat.helper.HexUtils.integerToHexString(cmd, hexBytes), ep) 
-}
-
-String secure(String cmd, ep = null ){ 
-	if (ep) {
-		return zwaveSecureEncap(zwave.multiChannelV4.multiChannelCmdEncap(destinationEndPoint: ep).encapsulate(cmd))
-	} else {
-		return zwaveSecureEncap(cmd) 
-	}
-}
-
-String secure(hubitat.zwave.Command cmd, ep = null ){ 
-	if (ep) {
-		return zwaveSecureEncap(zwave.multiChannelV4.multiChannelCmdEncap(destinationEndPoint: ep).encapsulate(cmd))
-	} else {
-		return zwaveSecureEncap(cmd) 
-	}
-}
-
-////    Multi-Channel Encapsulation   ////
-void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCmdEncap cmd)
-{
-    hubitat.zwave.Command  encapsulatedCommand = cmd.encapsulatedCommand(defaultParseMap)
-
-    if (encapsulatedCommand) {
-        zwaveEvent(encapsulatedCommand, cmd.sourceEndPoint as Short)
-    }
-}
-
-////    Z-Wave Message Parsing   ////
-void parse(String description) {
-	try {
-		hubitat.zwave.Command cmd = zwave.parse(description, defaultParseMap)
-		if (cmd) { zwaveEvent(cmd) }
-	}
-	catch (ex) {
-		log.error "Device ${device.displayName}: Error in parse() attempting to parse input: ${description}. \nError: ${ex}. \nStack trace is: ${getStackTrace(ex)}.\nException message is ${getExceptionMessageWithLine(ex)}. \nParse map is: ${defaultParseMap}."
-	}
-}
-
-////    Z-Wave Message Sending to Hub  ////
-void sendToDevice(List<hubitat.zwave.Command> cmds) { sendHubCommand(new hubitat.device.HubMultiAction(commands(cmds), hubitat.device.Protocol.ZWAVE)) }
-
-void sendToDevice(hubitat.zwave.Command cmd, ep = null ) { sendHubCommand(new hubitat.device.HubAction(secure(cmd, ep), hubitat.device.Protocol.ZWAVE)) }
-
-void sendSupervised(hubitat.zwave.Command cmd, ep = null ) { 
-		def sendThis = secure(supervise(cmd), ep)
-		log.debug "in sendSupervised, Sending supervised command: " + sendThis
-		sendHubCommand(new hubitat.device.HubAction( sendThis, hubitat.device.Protocol.ZWAVE)) 
-	}
-	
-
-void sendZwaveValue(Map params = [value: null , duration: null , ep: null ] )
-{
-	Integer newValue = Math.max(Math.min(params.value, 99),0)
-
-	if ( !(0..100).contains(params.value) ) {
-	log.warn "Device ${}: in function sendZwaveValue() received a value ${params.value} that is out of range. Valid range 0..100. Using value of ${newValue}."
-	}
-	
-	if (implementsZwaveClass(0x26, params.ep)) { // Multilevel  type device
-		sendSupervised(zwave.switchMultilevelV4.switchMultilevelSet(value: newValue, dimmingDuration:params.duration as Short), params.ep)	
-	} else if (implementsZwaveClass(0x25, params.ep)) { // Switch Binary Type device
-		sendSupervised(zwave.switchBinaryV1.switchBinarySet(switchValue: newValue ), params.ep)
-	} else if (implementsZwaveClass(0x20, params.ep)) { // Basic Set Type device
-		log.warn "Device ${targetDevice.displayName}: Using Basic Set to turn on device. A more specific command class should be used!"
-		sendSupervised(zwave.basicV2.basicSet(value: newValue ), params.ep)
-	} else {
-		log.error "Device ${device.displayName}: Error in function sendZwaveValue(). Device does not implement a supported class to control the device!.${ep ? " Endpoint # is: ${params.ep}." : ""}"
-		return
-	}
-}
-	
-	
-void sendToDevice(String cmd) { sendHubCommand(new hubitat.device.HubAction(cmd, hubitat.device.Protocol.ZWAVE)) }
-
-List<String> commands(List<hubitat.zwave.Command> cmds, Long delay=200) { return delayBetween(cmds.collect{ it }, delay) }
 
 //////////////////////////////////////////////////////////////////////
 //////        Hubitat Event Handling Helper Functions        ///////
@@ -1041,56 +456,9 @@ void sendEventToAll(Map event)
 		}
 }
 
-//////////////////////////////////////////////////////////////////////
-//////        Child Device Methods        ///////
-////////////////////////////////////////////////////////////////////// 
-
-Short getEndpoint(com.hubitat.app.DeviceWrapper device)
-{
-	if (device.is( null )) return null 
-	
-	return device.deviceNetworkId.split("-ep")[-1] as Short
-}
-
-void componentRefresh(com.hubitat.app.DeviceWrapper cd){
-    if (logEnable) log.info "received refresh request from component ${cd.displayName}"
-	refresh(cd:cd)
-}
-
-void componentOn(com.hubitat.app.DeviceWrapper cd){
-    log.debug "Device ${device.displayName}: received componentOn request from ${cd.displayName}"
-	on(cd:cd)
-}
-
-void componentOff(com.hubitat.app.DeviceWrapper cd){
-    log.debug "Device ${device.displayName}: received componentOff request from ${cd.displayName}"
-	off(cd:cd)
-}
-
-void componentSetLevel(com.hubitat.app.DeviceWrapper cd, level, transitionTime = null) {
-    log.debug "Device ${device.displayName}: received componentSetLevel(level: ${level}, transitionTime: ${transitionTime}) request from ${cd.displayName}"
-		
-	if (cd.hasCapability("FanControl") ) {
-			setSpeed(cd:cd, level:level, speed:levelToSpeed(level as Integer))
-		} else { 
-			setLevel(level:level, duration:transitionTime, cd:cd) 
-		}
-}
-
-void componentStartLevelChange(com.hubitat.app.DeviceWrapper cd, direction) {
-    if (logEnable) log.info "Device ${device.displayName}: received startLevelChange(${direction}) request from ${cd.displayName}"
-	startLevelChange(direction:direction, cd:cd)
-}
-
-void componentStopLevelChange(com.hubitat.app.DeviceWrapper cd) {
-    if (logEnable) log.info "Device ${device.displayName}: received stopLevelChange request from ${cd.displayName}"
-	stopLevelChange(cd:cd)
-}
-
-void componentSetSpeed(com.hubitat.app.DeviceWrapper cd, speed) {
-    if (logEnable) log.info "Device ${device.displayName}: received componentSetSpeed(${speed}) request from ${cd.displayName}"
-	setSpeed(speed:speed, cd:cd)
-}
+////////////////////////////////////////////////////////
+//////                Handle Fans                ///////
+////////////////////////////////////////////////////////
 
 String levelToSpeed(Integer level)
 {
@@ -1296,7 +664,7 @@ void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelReport
 
 		if ((targetLevel == 99) && (priorLevel == 100)) targetLevel = 100
 
-		if (targetDevice.hasAttribute("switch") && (priorSwitchState != newSwitchState))
+		if (targetDevice.hasAttribute("switch"))
 		{
 			targetDevice.sendEvent(	name: "switch", value: newSwitchState, descriptionText: "Switch state set", type: "physical" )
 			if (txtEnable) log.info "Device ${targetDevice.displayName} set to ${newSwitchState}."
@@ -1307,12 +675,8 @@ void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelReport
 		}
 		if (targetDevice.hasAttribute("level") && (targetLevel != 0 )) // Only handle on values 1-99 here. If device was turned off, that would be handle in the switch state block above.
 		{
-			// Don't send the event if the level doesn't change except if transitioning from off to on, always send!
-			if ((priorLevel != targetLevel) || (priorSwitchState != newSwitchState))
-			{
-				targetDevice.sendEvent( name: "level", value: targetLevel, descriptionText: "Level set", unit:"%", type: "physical" )
-				if (txtEnable) log.info "Device ${targetDevice.displayName} level set to ${targetLevel}%"		
-			}
+			targetDevice.sendEvent( name: "level", value: targetLevel, descriptionText: "Level set", unit:"%", type: "physical" )
+			if (txtEnable) log.info "Device ${targetDevice.displayName} level set to ${targetLevel}%"		
 		}
 	}
 }
@@ -1323,8 +687,10 @@ void on(Map params = [cd: null , duration: null , level: null ])
 	Short ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
 	
 	Integer targetLevel = 100
-	if (targetDevice.hasAttribute("switch") && targetDevice.currentValue("switch") == "off") {	
+	if (targetDevice.hasAttribute("switch")) {	
 		targetDevice.sendEvent(name: "switch", value: "on", descriptionText: "Device turned on", type: "digital")
+	} else {
+		log.error "Device ${targetDevice.displayName}: Error in function on(). Device does not have a switch attribute."
 	}
 	
 	if (targetDevice.hasAttribute("level")) {
@@ -1343,7 +709,7 @@ void off(Map params = [cd: null , duration: null ]) {
 	
 	if (txtEnable) log.info "Device ${targetDevice.displayName}: Turning device to: Off."
 
-	if (targetDevice.hasAttribute("switch") && targetDevice.currentValue("switch") != "off") {	
+	if (targetDevice.hasAttribute("switch")) {	
 		targetDevice.sendEvent(name: "switch", value: "off", descriptionText: "Device turned off", type: "digital")
 		
 		sendZwaveValue(value: 0, duration: params.duration, ep: ep)
@@ -1585,6 +951,108 @@ Map createInputControls(data)
 	}
 	return inputControls
 }
+
+
+void logsOff(){
+    log.warn "Device ${device.displayName}: debug logging disabled..."
+    device.updateSetting("logEnable",[value:"false",type:"bool"])
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////
+///////      Handle Update(), and Set, Get, and Process Parameter Values       ////////
+/////////////////////////////////////////////////////////////////////////////////////// 
+
+
+
+void updated()
+{
+	if (txtEnable) log.info "Device ${device.displayName}: Updating changed parameters (if any) . . ."
+	if (logEnable) runIn(1800,logsOff)
+	
+	ConcurrentHashMap<Short, BigInteger> parameterValueMap = getParameterValuesFromDevice()
+	ConcurrentHashMap<Short, BigInteger> pendingChanges = getPendingChangeMap()
+	Map<Short, BigInteger>  settingValueMap = getParameterValuesFromInputControls()
+		
+	// Find what changed
+	settingValueMap.each {k, v ->
+			if (v.is( null )) return
+		
+			Boolean changedValue = (v as BigInteger) != (parameterValueMap.get(k as Short) as BigInteger)
+			if (changedValue) pendingChanges.put(k as Short, v as BigInteger)
+			else pendingChanges.remove(k as Short)
+		}
+
+	if (logEnable) log.debug "Device ${device.displayName}: Pending changes are: ${pendingChanges}"
+	
+	state.pendingChanges = pendingChanges
+	processPendingChanges()
+	state.pendingChanges = pendingChanges
+}
+
+void processPendingChanges()
+{
+	getPendingChangeMap()?.each{ k, v ->
+		setParameter(parameterNumber: k , value: v)
+	}
+}
+
+void setParameter(parameterNumber,value) {
+	setParameter(parameterNumber:parameterNumber, value:value)
+}
+
+
+void setParameter(Map params = [parameterNumber: null , value: null ] ){
+    if (params.parameterNumber.is( null ) || params.value.is( null ) ) {
+		log.warn "Device ${device.displayName}: Can't set parameter ${parameterNumber}, Incomplete parameter list supplied... syntax: setParameter(parameterNumber,size,value), received: setParameter(${parameterNumber}, ${size}, ${value})."
+    } else {
+		parameterReports = allParameterReports.get(device.deviceNetworkId, new ConcurrentHashMap<Short, hubitat.zwave.Command>())
+
+		Short PSize = parameterReports.get(params.parameterNumber as Short).size
+
+		List<hubitat.zwave.Command> cmds = []
+	    cmds << secure(supervise(zwave.configurationV1.configurationSet(scaledConfigurationValue: params.value as BigInteger, parameterNumber: params.parameterNumber as Short, size: PSize)))
+	    cmds << secure(zwave.configurationV1.configurationGet(parameterNumber: params.parameterNumber))
+		sendToDevice(cmds)
+		
+		// Wait for the report that is returned after the configurationGet, and then update the input controls so they display the updated value.
+		hubitat.zwave.Command report = myReportQueue("7006").poll(10, TimeUnit.SECONDS)
+		if (report)
+		{
+			if ((report.scaledConfigurationValue) == (params.value as BigInteger)) {
+				log.info "Device ${device.displayName}: Successfully set parameter #: ${params.parameterNumber} to value ${params.value}."
+
+				String configName = "configParam${"${report.parameterNumber}".padLeft(3,"0")}"
+				if (logEnable) log.debug "Device ${device.displayName}: updating settings data for ${configName} to new value ${report.scaledConfigurationValue}!"
+				device.updateSetting("${configName}", report.scaledConfigurationValue as Integer)				
+	
+			} else {
+				log.warn "Device ${device.displayName}: Failed to set parameter #: ${params.parameterNumber} to value ${params.value}. Value of parameter is set to ${report.scaledConfigurationValue} instead."
+			}
+		}
+    }
+}
+
+// Gets a map of all the values currently stored in the input controls.
+Map<Short, BigInteger> getParameterValuesFromInputControls()
+{
+	ConcurrentHashMap inputs = getInputControlsForDevice()
+	Map<Short, BigInteger> settingValues = [:]
+	
+	inputs.each 
+		{ PKey , PData -> 
+			BigInteger newValue = 0
+			// if the setting returns an array, then it is a bitmap control, and add together the values.
+			if (settings.get(PData.name as String) instanceof ArrayList) {
+				settings.get(PData.name as String).each{ newValue += it as BigInteger }
+			} else  {   
+				newValue = settings.get(PData.name as String) as BigInteger  
+			}
+			settingValues.put(PKey as Short, newValue)
+		}
+	if (logEnable) log.debug "Current Setting Values are: " + settingValues
+	return settingValues
+}
 ////////////////////////////////////////////////////////////////////////
 /////////////      Parameter Updating and Management      /////////////
 ////////////////////////////////////////////////////////////////////////
@@ -1645,6 +1113,7 @@ void setInputControlParameterValuesToDeviceValue()
 		pendingChanges.remove(key as Short)
 	}
 }
+
 void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport  cmd)
 { 
 	parameterReports = allParameterReports.get(device.deviceNetworkId, new ConcurrentHashMap<Short, hubitat.zwave.Command>())
@@ -1652,98 +1121,6 @@ void zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport  cmd)
 	Boolean transferredReport = myReportQueue(cmd.CMD).offer(cmd)
 	if (transferredReport) { if (logEnable) log.debug "Successfully transferred Configuration Report to waiting receiver."}
 	else log.warn "Device ${device.displayName}: Failed to transfer Configuration Report."
-}
-
-///////////////////////////////////////////////////////////////////////////////////////
-///////      Handle Update(), and Set, Get, and Process Parameter Values       ////////
-/////////////////////////////////////////////////////////////////////////////////////// 
-Map<Short, BigInteger> getParameterValuesFromInputControls()
-{
-	ConcurrentHashMap inputs = getInputControlsForDevice()
-	Map<Short, BigInteger> settingValues = [:]
-	
-	inputs.each 
-		{ PKey , PData -> 
-			BigInteger newValue = 0
-			// if the setting returns an array, then it is a bitmap control, and add together the values.
-			if (settings.get(PData.name as String) instanceof ArrayList) {
-				settings.get(PData.name as String).each{ newValue += it as BigInteger }
-			} else  {   
-				newValue = settings.get(PData.name as String) as BigInteger  
-			}
-			settingValues.put(PKey as Short, newValue)
-		}
-	if (logEnable) log.debug "Current Setting Values are: " + settingValues
-	return settingValues
-}
-
-void logsOff(){
-    log.warn "Device ${device.displayName}: debug logging disabled..."
-    device.updateSetting("logEnable",[value:"false",type:"bool"])
-}
-
-void updated()
-{
-	if (txtEnable) log.info "Device ${device.displayName}: Updating changed parameters (if any) . . ."
-	if (logEnable) runIn(1800,logsOff)
-	
-	ConcurrentHashMap<Short, BigInteger> parameterValueMap = getParameterValuesFromDevice()
-	ConcurrentHashMap<Short, BigInteger> pendingChanges = getPendingChangeMap()
-	Map<Short, BigInteger>  settingValueMap = getParameterValuesFromInputControls()
-		
-	// Find what changed
-	settingValueMap.each {k, v ->
-			if (v.is( null )) return
-		
-			Boolean changedValue = (v as BigInteger) != (parameterValueMap.get(k as Short) as BigInteger)
-			if (changedValue) pendingChanges.put(k as Short, v as BigInteger)
-			else pendingChanges.remove(k as Short)
-		}
-
-	if (logEnable) log.debug "Device ${device.displayName}: Pending changes are: ${pendingChanges}"
-	
-	state.pendingChanges = pendingChanges
-	processPendingChanges()
-	state.pendingChanges = pendingChanges
-}
-
-void processPendingChanges()
-{
-	getPendingChangeMap()?.each{ k, v ->
-		setParameter(parameterNumber: k , value: v)
-	}
-}
-
-void setParameter(parameterNumber,value) {
-	setParameter(parameterNumber:parameterNumber, value:value)
-}
-void setParameter(Map params = [parameterNumber: null , value: null ] ){
-    if (params.parameterNumber.is( null ) || params.value.is( null ) ) {
-		log.warn "Device ${device.displayName}: Can't set parameter ${parameterNumber}, Incomplete parameter list supplied... syntax: setParameter(parameterNumber,size,value), received: setParameter(${parameterNumber}, ${size}, ${value})."
-    } else {
-		parameterReports = allParameterReports.get(device.deviceNetworkId, new ConcurrentHashMap<Short, hubitat.zwave.Command>())
-
-		Short PSize = parameterReports.get(params.parameterNumber as Short).size
-
-		List<hubitat.zwave.Command> cmds = []
-	    cmds << secure(supervise(zwave.configurationV1.configurationSet(scaledConfigurationValue: params.value as BigInteger, parameterNumber: params.parameterNumber as Short, size: PSize)))
-	    cmds << secure(zwave.configurationV1.configurationGet(parameterNumber: params.parameterNumber))
-		sendToDevice(cmds)
-		hubitat.zwave.Command report = myReportQueue("7006").poll(10, TimeUnit.SECONDS)
-		if (report)
-		{
-			if ((report.scaledConfigurationValue) == (params.value as BigInteger)) {
-				log.info "Device ${device.displayName}: Successfully set parameter #: ${params.parameterNumber} to value ${params.value}."
-
-				String configName = "configParam${"${report.parameterNumber}".padLeft(3,"0")}"
-				if (logEnable) log.debug "Device ${device.displayName}: updating settings data for ${configName} to new value ${report.scaledConfigurationValue}!"
-				device.updateSetting("${configName}", report.scaledConfigurationValue as Integer)				
-	
-			} else {
-				log.warn "Device ${device.displayName}: Failed to set parameter #: ${params.parameterNumber} to value ${params.value}. Value of parameter is set to ${report.scaledConfigurationValue} instead."
-			}
-		}
-    }
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -1849,3 +1226,655 @@ void zwaveEvent(hubitat.zwave.commands.doorlockv1.DoorLockOperationReport cmd)
 
 	if (lockEvent) sendEvent(lockEvent)
 }
+
+/////////////////////////////////////////////////////////////////////////
+//////        Create and Manage Child Devices for Endpoints       ///////
+/////////////////////////////////////////////////////////////////////////
+
+void deleteUnwantedChildDevices()
+{	
+	hubitat.zwave.Command endPointReport = getCachedMultiChannelEndPointReport()
+	if (!endPointReport) return
+	
+	Short numberOfEndPoints = endPointReport.endPoints
+	
+	// Delete child devices that don't use the proper network ID form (parent ID, followed by "-ep" followed by endpoint number).
+	getChildDevices()?.each
+	{ child ->	
+	
+		List childNetIdComponents = child.deviceNetworkId.split("-ep")
+                    
+		if (childNetIdComponents.size() != 2) {
+			deleteChildDevice(child.deviceNetworkId)			
+			
+		} else {
+            Boolean endPointInRange = ((0 as Short) < (childNetIdComponents[1] as Short)) && ((childNetIdComponents[1] as Short) <= numberOfEndPoints)
+			Boolean parentNetIdMatches = (childNetIdComponents[0]  == device.deviceNetworkId)
+			
+            if (!(parentNetIdMatches && endPointInRange )) {
+				deleteChildDevice(child.deviceNetworkId)	
+			}
+		}
+	}
+}
+
+void createChildDevices()
+{	
+	Integer mfr = 	device.getDataValue("manufacturer").toInteger()
+	Integer type = 	device.getDataValue("deviceType").toInteger()
+	Integer id = 	device.getDataValue("deviceId").toInteger()
+	
+	hubitat.zwave.Command endPointReport = getCachedMultiChannelEndPointReport()
+	if (!endPointReport) return
+	
+	Short numberOfEndPoints = endPointReport.endPoints
+	
+	Short thisKid = 1
+	for ( thisKid; thisKid <= numberOfEndPoints; thisKid++)
+	{
+		String childNetworkId = "${device.deviceNetworkId}-ep${"${thisKid}".padLeft(3, "0") }"
+		com.hubitat.app.DeviceWrapper cd = getChildDevice(childNetworkId)
+
+		if (cd.is( null )) {
+			log.info "Device ${device.displayName}: creating child device: ${childNetworkId}"
+			String childDriver
+			
+			if (implementsZwaveClass(0x25, thisKid ) ){  // Binary Switch
+				if (implementsZwaveClass(0x32, thisKid ) ){ // Meter Supported
+					childDriver = "Generic Component Metering Switch"
+				} else {
+					childDriver = "Generic Component Switch"
+				}
+			} else  if (implementsZwaveClass(0x26, thisKid ) ){ // MultiLevel Switch
+				childDriver = "Generic Component Dimmer"
+			}
+
+			addChildDevice("hubitat", childDriver, childNetworkId, [name: "${device.displayName}-ep${thisKid}", isComponent: false])
+		} else {
+			log.info "Device ${device.displayName}: Child device with network id ${childNetworkId} already exist. No need to re-create."
+		}
+	}
+}
+
+//////////////////////////////////////////////////////////////////////
+//////        Child Device Methods        ///////
+////////////////////////////////////////////////////////////////////// 
+
+Short getEndpoint(com.hubitat.app.DeviceWrapper device)
+{
+	if (device.is( null )) return null 
+	
+	return device.deviceNetworkId.split("-ep")[-1] as Short
+}
+
+void componentRefresh(com.hubitat.app.DeviceWrapper cd){
+    if (logEnable) log.info "received refresh request from component ${cd.displayName}"
+	refresh(cd:cd)
+}
+
+void componentOn(com.hubitat.app.DeviceWrapper cd){
+    log.debug "Device ${device.displayName}: received componentOn request from ${cd.displayName}"
+	on(cd:cd)
+}
+
+void componentOff(com.hubitat.app.DeviceWrapper cd){
+    log.debug "Device ${device.displayName}: received componentOff request from ${cd.displayName}"
+	off(cd:cd)
+}
+
+void componentSetLevel(com.hubitat.app.DeviceWrapper cd, level, transitionTime = null) {
+    log.debug "Device ${device.displayName}: received componentSetLevel(level: ${level}, transitionTime: ${transitionTime}) request from ${cd.displayName}"
+		
+	if (cd.hasCapability("FanControl") ) {
+			setSpeed(cd:cd, level:level, speed:levelToSpeed(level as Integer))
+		} else { 
+			setLevel(level:level, duration:transitionTime, cd:cd) 
+		}
+}
+
+void componentStartLevelChange(com.hubitat.app.DeviceWrapper cd, direction) {
+    if (logEnable) log.info "Device ${device.displayName}: received startLevelChange(${direction}) request from ${cd.displayName}"
+	startLevelChange(direction:direction, cd:cd)
+}
+
+void componentStopLevelChange(com.hubitat.app.DeviceWrapper cd) {
+    if (logEnable) log.info "Device ${device.displayName}: received stopLevelChange request from ${cd.displayName}"
+	stopLevelChange(cd:cd)
+}
+
+void componentSetSpeed(com.hubitat.app.DeviceWrapper cd, speed) {
+    if (logEnable) log.info "Device ${device.displayName}: received componentSetSpeed(${speed}) request from ${cd.displayName}"
+	setSpeed(speed:speed, cd:cd)
+}
+
+
+//////////////////////////////////////////////////////////////////////
+//////        Report Pre-Caching Library Functions            ///////
+////////////////////////////////////////////////////////////////////// 
+
+hubitat.zwave.Command  getCachedVersionReport() { 
+								getReportCachedByNetworkId(zwave.versionV1.versionGet(), null )
+							}
+								
+hubitat.zwave.Command  getCachedNotificationSupportedReport(Short ep = null ) { 
+								if (implementsZwaveClass(0x71, ep) < 2) return null
+								getReportCachedByProductId(zwave.notificationV8.notificationSupportedGet(), ep)
+							}
+								
+hubitat.zwave.Command  getCachedMultiChannelEndPointReport() { 
+								getReportCachedByProductId(zwave.multiChannelV4.multiChannelEndPointGet(), null )
+							}
+								
+hubitat.zwave.Command  getCachedMultiChannelCapabilityReport(Short ep)  { 
+								getReportCachedByProductId(zwave.multiChannelV4.multiChannelCapabilityGet(endPoint: ep), null )
+							}
+								
+hubitat.zwave.Command  getCachedCentralSceneSupportedReport() { 
+								getReportCachedByProductId(zwave.centralSceneV3.centralSceneSupportedGet(), null ) 
+							}
+								
+hubitat.zwave.Command  getCachedMeterSupportedReport(Short ep = null ) { 
+								if (implementsZwaveClass(0x32, ep) < 2) return null
+								getReportCachedByProductId(zwave.meterV5.meterSupportedGet(), ep) 
+							}
+														
+hubitat.zwave.Command  getCachedProtectionSupportedReport(Short ep = null ) { 
+								if (implementsZwaveClass(0x75, ep) < 2) return null
+								getReportCachedByProductId(zwave.protectionV2.protectionSupportedGet(), ep) 
+							}
+								
+hubitat.zwave.Command  getCachedSwitchMultilevelSupportedReport(Short ep = null ) { 
+								if (implementsZwaveClass(0x26, ep) < 3) return null
+								getReportCachedByProductId(zwave.switchMultilevelV4.switchMultilevelSupportedGet(), ep) 
+							}
+
+hubitat.zwave.Command  getCachedSensorMultilevelSupportedSensorReport(Short ep = null ) { 
+								if (implementsZwaveClass(0x31, ep) < 5) return null
+								getReportCachedByProductId(zwave.sensorMultilevelV11.sensorMultilevelSupportedGetSensor(), ep) 
+							}
+
+// =============================================
+void preCacheReports()
+{
+		getCachedVersionReport() 										
+
+		List<Short> 	deviceClasses = getDataValue("inClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Short }
+						deviceClasses += getDataValue("secureInClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Short }
+		
+		deviceClasses.each{ it ->  implementsZwaveClass(it) }
+		
+		getCachedCentralSceneSupportedReport()		
+		getCachedNotificationSupportedReport()										
+		getCachedMeterSupportedReport()																		
+		getCachedProtectionSupportedReport()										
+		getCachedSwitchMultilevelSupportedReport()				
+		getCachedSensorMultilevelSupportedSensorReport()	
+		
+		if (implementsZwaveClass(0x60))
+		{
+			hubitat.zwave.Command endPointReport = getCachedMultiChannelEndPointReport()
+			for (Short endPoint = 1; endPoint < (endPointReport.endPoints as Short); endPoint++)
+			{
+				hubitat.zwave.Command report = getCachedMultiChannelCapabilityReport(endPoint as Short)
+				getCachedNotificationSupportedReport(endPoint)										
+				getCachedMeterSupportedReport(endPoint)																		
+				getCachedProtectionSupportedReport(endPoint)										
+				getCachedSwitchMultilevelSupportedReport(endPoint)				
+				getCachedSensorMultilevelSupportedSensorReport(endPoint)			
+			}
+		}
+}
+
+
+@Field static ConcurrentHashMap<String, ConcurrentHashMap> reportsCachedByProductId = new ConcurrentHashMap<String, ConcurrentHashMap>(32)
+@Field static ConcurrentHashMap<String, ConcurrentHashMap> reportsCachedByNetworkId = new ConcurrentHashMap<String, ConcurrentHashMap>(64)
+
+// reportQueues stores a map of SynchronousQueues. When requesting a report from a device, the report handler communicates the report back to the requesting function using a queue. This makes programming more like "synchronous" programming, rather than asynchronous handling.
+// This is a map within a map. The first level map is by deviceNetworkId. Since @Field static variables are shared among all devices using the same driver code, this ensures that you get a unique second-level map for a particular device. The second map is keyed by the report class hex string. For example, if you want to wait for the configurationGet report, wait for "7006".
+@Field static reportQueues = new ConcurrentHashMap<String, ConcurrentHashMap>()
+
+SynchronousQueue myReportQueue(String reportClass)
+{
+	ConcurrentHashMap thisDeviceQueues = reportQueues.get(device.deviceNetworkId, new ConcurrentHashMap<String,SynchronousQueue>())
+	
+	// Get the queue if it exists, create (new) it if it does not.
+	SynchronousQueue thisReportQueue = thisDeviceQueues.get(reportClass, new SynchronousQueue())
+	return thisReportQueue
+}
+
+//////////////////////////////////////////////////////////////////////
+//////       @Field staic Hash Map Management Functions            ///////
+////////////////////////////////////////////////////////////////////// 
+
+// This driver uses a number of @Field static variables. Since these are shared among all devices that use this driver file, they must be keyed to ensure they are unique to a device.
+// Two types of keys are used. productKey() generates a key that is unique to a particular model and firmware. The data keyed by this key is shared among all devices of the same model. This is useful where each device will have the exact same data at all times (e.g., the set of parameter inputs that it supports).  A second key is device.deviceNetworkId. This is used where the data is unique to a particular device
+
+///   Functions to generate keys used to access the concurrent Hash Maps and to store into the hash maps ///
+Integer getManufacturerNumber() { device.getDataValue("manufacturer").toInteger() }
+Integer getDeviceTypeNumber() { device.getDataValue("deviceType").toInteger() }
+Integer getDeviceIdNumber() {device.getDataValue("deviceId").toInteger() }
+
+String getManufacturerHexString() { return hubitat.helper.HexUtils.integerToHexString( getManufacturerNumber(), 2) }
+String getDeviceTypeHexString() { return hubitat.helper.HexUtils.integerToHexString( getDeviceTypeNumber(), 2) }
+String getDeviceIdHexString() { return hubitat.helper.HexUtils.integerToHexString( getDeviceIdNumber(), 2) }
+
+String productKey() // Generates a key based on manufacturer / device / firmware. Data is shared among all similar end-devices.
+{
+	if (remindEnable) log.warn "productKey function should be updated with a hash based on inclusters as some devices may remove change their inclusters depending on pairing state. for example, Zooz Zen 18 motion sensor may or may not show with a battery!"
+	
+	String key = "${getManufacturerHexString()}:${getDeviceTypeHexString()}:${getDeviceIdHexString()}:"
+	return key
+}
+
+String firmwareKey(String firmwareReport)
+{
+	hubitat.zwave.Command   versionReport = getCachedVersionReport() 
+	if (!versionReport)  {
+			log.warn "Device ${device.displayName} called firmwareKey function but firmware version is not cached! Device may not be operating correctly. Returning null."
+			return null
+		}
+	return productKey() + versionReport?.format()
+}
+
+///////////////////////////////////////////
+@Field static ConcurrentHashMap<String, ConcurrentHashMap> CommandClassVersionReportsByProductID = new ConcurrentHashMap<String, ConcurrentHashMap>(32)
+
+hubitat.zwave.Command  getCachedVersionCommandClassReport(Short requestedCommandClass)		
+{
+	ConcurrentHashMap ClassReports = CommandClassVersionReportsByProductID.get(firmwareKey(), new ConcurrentHashMap<Short,ConcurrentHashMap>())
+
+	hubitat.zwave.Command cmd = ClassReports?.get(requestedCommandClass)
+	
+	if (cmd) { 
+		return cmd
+	} else {
+		sendToDevice(zwave.versionV1.versionCommandClassGet(requestedCommandClass: requestedCommandClass ))
+		cmd = myReportQueue("8614").poll(10, TimeUnit.SECONDS)
+		if(cmd.is( null ) ) {log.warn "Device ${device.displayName}: failed to retrieve a requested command class ${requestedCommandClass}."; return null }
+		ClassReports.put(cmd.requestedCommandClass, cmd)
+	}
+	return ClassReports?.get(requestedCommandClass)
+}
+
+void zwaveEvent(hubitat.zwave.commands.versionv3.VersionCommandClassReport cmd, ep = null ) { myReportQueue(cmd.CMD).offer(cmd) }
+///////////////////////////////////////////
+/*
+String reportHexStringToCommandHexString(String reportClass)
+{
+	Integer getCommandNumber = hubitat.helper.HexUtils.hexStringToInt(reportClass) - 1
+	return hubitat.helper.HexUtils.integerToHexString(getCommandNumber, 2)
+}
+*/
+String commandHexStringToReportHexString(String commandClass)
+{
+	Integer getReportNumber = hubitat.helper.HexUtils.hexStringToInt(commandClass) + 1
+	return hubitat.helper.HexUtils.integerToHexString(getReportNumber, 2)
+}
+
+
+hubitat.zwave.Command   getReportCachedByNetworkId(Map options = [:], hubitat.zwave.Command getCmd, ep )  
+{
+	ConcurrentHashMap cacheForThisNetId = reportsCachedByNetworkId.get(device.deviceNetworkId, new ConcurrentHashMap<String,SynchronousQueue>())
+	ConcurrentHashMap cacheForThisEndpoint = cacheForThisNetId?.get((ep ?: 0) as Short, new ConcurrentHashMap<String,Object>() )	
+	
+	String reportClass = commandHexStringToReportHexString(getCmd.CMD)		
+	hubitat.zwave.Command cmd = cacheForThisEndpoint?.get(reportClass)
+	
+	if (cmd) { 
+		return cmd
+		// runInMillis(10, replayCommand, [overwrite:false, data: [cachedVersionReport, ep ] ] )
+	} else {
+		Map transferredData;
+		while( transferredData.is (null ) )
+		{
+			sendToDevice(getCmd, ep)
+			transferredData = myReportQueue(reportClass).poll(10, TimeUnit.SECONDS)
+		}
+		cmd =  transferredData.report
+		cacheForThisEndpoint.put(cmd.CMD, cmd)
+	}
+	return cacheForThisEndpoint?.get(reportClass)
+}
+
+
+hubitat.zwave.Command   getReportCachedByProductId(Map options = [:], hubitat.zwave.Command getCmd, Short ep)  
+{
+	if (!implementsZwaveClass(getCmd.commandClassId, ep))
+		{
+			// if (logEnable) log.debug "Command class ${getCmd.commandClassId} not implemented by this device for endpoint ${ep ?: 0}: " + getCmd
+			return null
+		}
+	Short subIndex
+	switch (getCmd.CMD)
+	{
+		case "6009": // This get request carries the endPoint within the message, so use that to key the storage array
+			subIndex = getCmd.endPoint
+			break
+		default :
+			subIndex = ep ?: 0
+			break
+	}
+	ConcurrentHashMap cacheForThisProductId = reportsCachedByProductId.get(firmwareKey(), new ConcurrentHashMap<String,SynchronousQueue>())
+	ConcurrentHashMap cacheForThisSubIndex = cacheForThisProductId?.get(subIndex, new ConcurrentHashMap<String,Object>() )	
+
+	String reportClass = commandHexStringToReportHexString(getCmd.CMD)
+	hubitat.zwave.Command cmd = cacheForThisSubIndex?.get(reportClass)
+	
+	if (cmd) { 
+		return cmd
+		// if (logEnable) log.debug "Device ${device.displayName}: In function getReportCachedByProductId, getting report using command ${getCmd} for endpoint ${ep}."
+	} else {
+		// if (logEnable) log.debug "Device ${device.displayName}: sending to device a command : ${getCmd} to get report ${reportClass} for subIndex ${subIndex}."
+		sendToDevice(getCmd, ep)
+		Map transferredData = myReportQueue(reportClass).poll(10, TimeUnit.SECONDS)
+		// if (logEnable) log.debug "Device ${device.displayName}: Transferred data for report ${getCmd} is: " + transferredData
+		cmd =  transferredData.report
+		cacheForThisSubIndex.put(cmd.CMD, cmd)
+	}
+	return cacheForThisSubIndex?.get(reportClass)
+}
+
+void replayCommand(params)
+{
+    Short commandClass =  (params[0].commandClassId) as Short
+    Short command =       (params[0].commandId) as Short
+    List<Short> payload = (params[0].payload)
+    Short ep = params[1]
+    
+    zwaveEvent(zwave.getCommand(commandClass, command, payload) , ep)
+}
+
+void logStoredReportCache()
+{
+	log.debug "report cache for items stored based on ProductId and firmware version is: " + reportsCachedByProductId
+	log.debug "reportsCachedByNetworkId stored based on NetworkId is: " + reportsCachedByNetworkId
+	log.debug "CommandClassVersionReportsByProductID is: " + CommandClassVersionReportsByProductID
+	log.debug "OpenSmartHouseRecords are: " + OpenSmartHouseRecords
+}
+
+/////////////////  Caching Functions To return Reports! //////////////////////////////
+
+void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneSupportedReport  cmd, ep = null )  				{ transferReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.meterv5.MeterSupportedReport cmd, ep = null ) 								{ transferReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelEndPointReport  cmd, ep = null )  				{ transferReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationSupportedReport cmd, ep = null )    	 			{ transferReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.notificationv8.EventSupportedReport cmd, ep = null )    	 					{ transferReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.protectionv2.ProtectionSupportedReport  cmd, ep = null )   					{ transferReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.switchmultilevelv4.SwitchMultilevelSupportedReport  cmd, ep = null )   		{ transferReport(cmd, ep) }
+void zwaveEvent(hubitat.zwave.commands.sensormultilevelv11.SensorMultilevelSupportedSensorReport  cmd, ep = null ) 	{ transferReport(cmd, ep) }		
+void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd, ep = null )  									{ transferReport(cmd, ep) }
+Boolean transferReport(cmd, ep)
+{ 	
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
+
+	Boolean transferredReport = myReportQueue(cmd.CMD).offer([report:cmd, endPoint:ep])
+	if (!transferredReport) { log.warn "Device ${targetDevice.displayName}: Failed to transfer version report for command ${cmd}." }
+}
+
+void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCapabilityReport  cmd)
+{ 
+	// This requires special processing. Endpoint is in the message, not passed as a parameter, but want to store it based on endpoint!
+	Boolean transferredReport = myReportQueue(cmd.CMD).offer([report:cmd, endPoint:cmd.endPoint])
+	if (!transferredReport) { log.warn "Device ${device.displayName}: Failed to transfer version report for command ${cmd}." }
+}
+
+List <Short> getNotificationSupportedReportsAsList(Short ep = null ) 	
+{ 
+	hubitat.zwave.Command  report = getCachedNotificationSupportedReport(ep)
+	
+	List<Short> notificationTypes =[]
+		if (report.smoke)				notificationTypes << 1 // Smoke
+		if (report.co)					notificationTypes << 2 // CO
+		if (report.co2)					notificationTypes << 3 // CO2
+		if (report.heat)				notificationTypes << 4 // Heat
+		if (report.water)				notificationTypes << 5 // Water
+		if (report.accessControl) 		notificationTypes << 6 // Access Control
+		if (report.burglar)				notificationTypes << 7 // Burglar
+		if (report.powerManagement)		notificationTypes << 8 // Power Management
+		if (report.system)				notificationTypes << 9 // System
+		if (report.emergency)			notificationTypes << 10 // Emergency Alarm
+		if (report.clock)				notificationTypes << 11 // Clock
+		if (report.appliance)			notificationTypes << 12 // Appliance
+		if (report.homeHealth)			notificationTypes << 13 // Home Health
+		if (report.siren)				notificationTypes << 14 // Siren
+		if (report.waterValve)			notificationTypes << 15 // Water Valve
+		if (report.weatherAlarm)		notificationTypes << 16 // Weather Alarm
+		if (report.irrigation)			notificationTypes << 17 // Irrigation
+		if (report.gasAlarm)			notificationTypes << 18 // Gas Alarm
+		if (report.pestControl)			notificationTypes << 19 // Pest Control
+		if (report.lightSensor)			notificationTypes << 20 // Light Sensor
+		if (report.waterQuality)		notificationTypes << 21 // Water Quality
+		if (report.homeMonitoring)		notificationTypes << 22 // Home Monitoring
+	return notificationTypes
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+Integer implementsZwaveClass(commandClass, ep = null ) {implementsZwaveClass(commandClass as Short, ep as Short )}
+Integer implementsZwaveClass(Short commandClass, Short ep = null )
+{
+	List<Short> deviceClasses = getDataValue("inClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Short }
+				deviceClasses += getDataValue("secureInClusters")?.split(",").collect{ hexStrToUnsignedInt(it) as Short }
+	if (ep ) 
+	{
+		Boolean supportsEndpoints = deviceClasses.contains(0x60 as Short)
+		Short numberOfEndPoints = getCachedMultiChannelEndPointReport().endPoints
+		
+		if (supportsEndpoints && (ep <= numberOfEndPoints))
+		{
+			if (getCachedMultiChannelCapabilityReport(ep)?.commandClass.contains(commandClass)) {
+				return getCachedVersionCommandClassReport(commandClass)?.commandClassVersion
+			} else {
+				return null
+			}
+		} else {
+			log.warn "Device ${device.displayName}: called function implementsZwaveClass(commandClass = ${commandClass}, ep = ${ep}). Maximum endpoints supported by this device is: ${numberOfEndPoints ? numberOfEndPoints : 0}" 
+			return null
+		}
+		
+	} else  if (deviceClasses.contains(commandClass)) {
+		Integer returnClassVersion = getCachedVersionCommandClassReport(commandClass)?.commandClassVersion
+		
+		if (! returnClassVersion) { 
+				log.warn "Device ${device.displayName}: In implementsZwaveClass function, Failed to retrieve a command class version for command class ${commandClass} even though class is supported. Forcing a return of 1."
+				returnClassVersion = 1 
+			} 
+		return returnClassVersion
+	} 
+	return null
+}
+		
+//////////////////////////////////////////////////////////////////////
+//////        Handle Supervision request and reports           ///////
+////////////////////////////////////////////////////////////////////// 
+
+// @Field static results in variable being shared among all devices that use the same driver, so I use a concurrentHashMap keyed by a device's deviceNetworkId to get a unqiue value for a particular device
+// supervisionSessionIDs stores the last used sessionID value (0..31) for a device. It must be incremented mod 32 on each send
+// supervisionSentCommands stores the last command sent
+
+@Field static ConcurrentHashMap<String, Short> supervisionSessionIDs = new ConcurrentHashMap<String, Short>()
+@Field static ConcurrentHashMap<String, Short> supervisionSentCommands = new ConcurrentHashMap<String, ConcurrentHashMap<Short, hubitat.zwave.Command>>()
+
+// supervisionRejected is a concurrentHashMap within a concurrentHashMap. A first HashMap is retrieved using the device's firmwareKey. This means that it is shared among all devices that have the same manufacturere, device Type, device ID, and firmware version
+// That first map is then a map of all of the commands (cmd.CMD) that have been rejectefd. So, if a command is rejected as not supervisable, it doesn't get sent using supervision by any similar device
+@Field static ConcurrentHashMap<String, ConcurrentHashMap> supervisionRejected = new ConcurrentHashMap<String, ConcurrentHashMap<String, Boolean>>()
+
+Boolean commandSupervisionNotSupported(hubitat.zwave.Command cmd) {	
+	Boolean previouslyRejected = ( supervisionRejected.get(firmwareKey())?.get(cmd.CMD) ) ? true : false 
+	if (logEnable && previouslyRejected) log.debug "Device ${device.displayName}: Attempted to supervise a class ${cmd.CMD} which was previously rejected as not supervisable."
+	return previouslyRejected 
+}
+
+void markSupervisionNotSupported(hubitat.zwave.Command cmd) {	
+	supervisionRejected.get(firmwareKey(), new ConcurrentHashMap<String, Boolean>() ).put(cmd.CMD, true )
+}
+
+def supervise(hubitat.zwave.Command command)
+{
+    if (superviseEnable && (!commandSupervisionNotSupported(command)) && implementsZwaveClass(0x6C))
+	{
+		// Get the next session ID mod 32, but if there is no stored session ID, initialize it with a random value.
+		Short nextSessionID = supervisionSessionIDs.get(device.getDeviceNetworkId() as String,((Math.random() * 32) % 32) as Short )
+		nextSessionID = (nextSessionID + 1) % 32 // increment and then mod with 32
+		supervisionSessionIDs.replace(device.getDeviceNetworkId(), nextSessionID)
+		
+		// Store the command that is being sent so that you can log.debug it and resend in case of failure!
+		supervisionSentCommands.get(device.getDeviceNetworkId() as String, new ConcurrentHashMap<Short, hubitat.zwave.Command>()).put(nextSessionID, command)
+
+		if (logEnable) log.debug "Supervising a command: ${command} with session ID: ${nextSessionID}."
+		return zwave.supervisionV1.supervisionGet(sessionID: nextSessionID, statusUpdates: false ).encapsulate(command)
+	} else {
+		return command
+	}
+}
+
+// This handles a supervised message (a "get") received from the Z-Wave device //
+void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd, Short ep = null ) {
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
+	
+    if (logEnable) log.debug "Received a SupervisionGet message from ${targetDevice.displayName}. The SupervisionGet message is: ${cmd}"
+
+    hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(parseMap, defaultParseMap)
+	
+    if (encapsulatedCommand) {
+        zwaveEvent(encapsulatedCommand, ep)
+    }
+    sendToDevice((new hubitat.zwave.commands.supervisionv1.SupervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0)), ep)
+}
+
+void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionReport cmd, Short ep = null ) {
+	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
+	
+	hubitat.zwave.Command whatWasSent = supervisionSentCommands?.get(device.getDeviceNetworkId() as String)?.get(cmd.sessionID)
+
+	switch (cmd.status)
+	{
+		case 0x00:
+			log.warn "Device ${targetDevice.displayName}: Z-Wave Command supervision not supported for: ${whatWasSent}. Re-sending without supervision."
+			markSupervisionNotSupported(whatWasSent)
+			sendToDevice(whatWasSent, ep )
+			break
+		case 0x01:
+			if (txtEnable) log.info "Device ${targetDevice.displayName}: Still processing command: ${whatWasSent}."
+		case 0x02:
+			log.warn "Device ${targetDevice.displayName}: Z-Wave supervised command reported failure. Failed command: ${whatWasSent}. Re-sending without supervision."
+			markSupervisionNotSupported(whatWasSent)
+			sendToDevice(whatWasSent, ep )
+			break
+		case 0xFF:
+			if (txtEnable) log.info "Device ${targetDevice.displayName}: Device successfully processed supervised command ${whatWasSent}."
+			break
+	}
+}
+
+//////////////////////////////////////////////////////////////////////
+//////                  Z-Wave Helper Functions                ///////
+//////   Format messages, Send to Device, secure Messages      ///////
+//////////////////////////////////////////////////////////////////////
+Map getDefaultParseMap()
+{
+return [
+	0x20:2, // Basic Set
+	0x25:2, // Switch Binary
+	0x26:4, // Switch MultiLevel 
+	0x31:11, // Sensor MultiLevel
+	0x32:5, // Meter
+	0x5B:3,	// Central Scene
+	0x60:4,	// MultiChannel
+	0x62:1,	// Door Lock
+	0x63:1,	// User Code
+	0x6C:1,	// Supervision
+	0x71:8, // Notification
+	0x80:1, // Battery
+	0x86:3,	// Version
+	0x98:1,	// Security
+	0x9B:2,	// Configuration
+	0x87:3  // Indicator
+	]
+}
+
+//// Catch Event Not Otherwise Handled! /////
+
+void zwaveEvent(hubitat.zwave.Command cmd, ep = null) {
+    log.debug "For ${device.displayName}, Received Z-Wave Message ${cmd} that is not handled by this driver. Endpoint: ${ep}. Message class: ${cmd.class}."
+}
+
+////    Security Encapsulation   ////
+void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
+	hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand( parseMap, defaultParseMap )
+    if (encapsulatedCommand) { zwaveEvent(encapsulatedCommand) }
+}
+
+String secure(Integer cmd, Integer hexBytes = 2, ep = null ) { 
+    return secure(hubitat.helper.HexUtils.integerToHexString(cmd, hexBytes), ep) 
+}
+
+String secure(String cmd, ep = null ){ 
+	if (ep) {
+		return zwaveSecureEncap(zwave.multiChannelV4.multiChannelCmdEncap(destinationEndPoint: ep).encapsulate(cmd))
+	} else {
+		return zwaveSecureEncap(cmd) 
+	}
+}
+
+String secure(hubitat.zwave.Command cmd, ep = null ){ 
+	if (ep) {
+		return zwaveSecureEncap(zwave.multiChannelV4.multiChannelCmdEncap(destinationEndPoint: ep).encapsulate(cmd))
+	} else {
+		return zwaveSecureEncap(cmd) 
+	}
+}
+
+////    Multi-Channel Encapsulation   ////
+void zwaveEvent(hubitat.zwave.commands.multichannelv4.MultiChannelCmdEncap cmd) {
+    hubitat.zwave.Command  encapsulatedCommand = cmd.encapsulatedCommand(defaultParseMap)
+    if (encapsulatedCommand) { zwaveEvent(encapsulatedCommand, cmd.sourceEndPoint as Short) }
+}
+
+////    Z-Wave Message Parsing   ////
+void parse(String description) {
+	try {
+		hubitat.zwave.Command cmd = zwave.parse(description, defaultParseMap)
+		if (cmd) { zwaveEvent(cmd) }
+	}
+	catch (ex) {
+		log.error "Device ${device.displayName}: Error in parse() attempting to parse input: ${description}. \nError: ${ex}. \nStack trace is: ${getStackTrace(ex)}.\nException message is ${getExceptionMessageWithLine(ex)}. \nParse map is: ${defaultParseMap}."
+	}
+}
+
+////    Z-Wave Message Sending to Hub  ////
+void sendToDevice(List<hubitat.zwave.Command> cmds) { sendHubCommand(new hubitat.device.HubMultiAction(commands(cmds), hubitat.device.Protocol.ZWAVE)) }
+
+void sendToDevice(hubitat.zwave.Command cmd, ep = null ) { sendHubCommand(new hubitat.device.HubAction(secure(cmd, ep), hubitat.device.Protocol.ZWAVE)) }
+
+void sendSupervised(hubitat.zwave.Command cmd, ep = null ) { 
+		def sendThis = secure(supervise(cmd), ep)
+		log.debug "in sendSupervised, Sending supervised command: " + sendThis
+		sendHubCommand(new hubitat.device.HubAction( sendThis, hubitat.device.Protocol.ZWAVE)) 
+	}
+void sendToDevice(String cmd) { sendHubCommand(new hubitat.device.HubAction(cmd, hubitat.device.Protocol.ZWAVE)) }
+
+List<String> commands(List<hubitat.zwave.Command> cmds, Long delay=200) { return delayBetween(cmds.collect{ it }, delay) }
+
+////    Send Simple Z-Wave Commands to Device  ////	
+void sendZwaveValue(Map params = [value: null , duration: null , ep: null ] )
+{
+	Integer newValue = Math.max(Math.min(params.value, 99),0)
+
+	if ( !(0..100).contains(params.value) ) {
+	log.warn "Device ${}: in function sendZwaveValue() received a value ${params.value} that is out of range. Valid range 0..100. Using value of ${newValue}."
+	}
+	
+	if (implementsZwaveClass(0x26, params.ep)) { // Multilevel  type device
+		sendSupervised(zwave.switchMultilevelV4.switchMultilevelSet(value: newValue, dimmingDuration:params.duration as Short), params.ep)	
+	} else if (implementsZwaveClass(0x25, params.ep)) { // Switch Binary Type device
+		sendSupervised(zwave.switchBinaryV1.switchBinarySet(switchValue: newValue ), params.ep)
+	} else if (implementsZwaveClass(0x20, params.ep)) { // Basic Set Type device
+		log.warn "Device ${targetDevice.displayName}: Using Basic Set to turn on device. A more specific command class should be used!"
+		sendSupervised(zwave.basicV2.basicSet(value: newValue ), params.ep)
+	} else {
+		log.error "Device ${device.displayName}: Error in function sendZwaveValue(). Device does not implement a supported class to control the device!.${ep ? " Endpoint # is: ${params.ep}." : ""}"
+		return
+	}
+}
+	
+	
