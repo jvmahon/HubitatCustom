@@ -1,20 +1,20 @@
 {
   "packageName": "Advanced Universal Z-Wave Drivers",
   "author": "jvm",
-  "version": "0.0.8",
-  "minimumHEVersion": "2.2.3",
-  "dateReleased": "2021-01-05",
+  "version": "0.1.0",
+  "minimumHEVersion": "2.2.5",
+  "dateReleased": "2021-02-23",
   "drivers": [
     {
       "id": "4429838c-b709-426d-afc8-0fe8fbafdba7",
-      "name": "[Beta 0.0.7] Advanced Zwave Plus Metering Dimmer",
+      "name": "[Beta 0.1.0] Advanced Zwave Plus Metering Dimmer",
       "namespace": "jvm",
       "location": "https://raw.githubusercontent.com/jvmahon/HubitatCustom/main/Advanced%20Universal%20Z-Wave%20Plus%20Dimmer%20Driver.groovy",
       "required": false
     },
     {
       "id": "3970ad30-88ee-498e-b532-1c5852a9bd5c",
-      "name": "[Beta 0.0.7] Advanced Zwave Plus Metering Switch",
+      "name": "[Beta 0.1.0] Advanced Zwave Plus Metering Switch",
       "namespace": "jvm",
       "location": "https://raw.githubusercontent.com/jvmahon/HubitatCustom/main/Advanced%20Universal%20Z-Wave%20Plus%20Switch%20Driver.groovy",
       "required": false
