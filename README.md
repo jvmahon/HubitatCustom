@@ -22,7 +22,10 @@ On first boot, the driver checks if the device has endpoint support and if any e
 
 The endpoint code will replace the endpoint driver with either a switch, metering switch, or dimmer component driver.
 
-If your device should use a different component driver, you can change it manually.  For example, if you have an  Inovelli LZW36, change endpoint #2 to the "Generic Component Fan Driver".
+## Fan Support
+###Inovelli LZW36
+The driver supports fan control using the Inovelli LZW36 controller.
+To support the  Inovelli LZW36, install and initialize the Dimmer driver, then change endpoint #2's driver to "Generic Component Fan Driver". DO NOT use the "Hampton Bay Fan Component" driver.
 
 ## Window Shade Support (Maybe)
 
