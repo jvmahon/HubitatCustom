@@ -2,7 +2,7 @@ import java.util.concurrent.* // Available (white-listed) concurrency classes: C
 import groovy.transform.Field
 
 metadata {
-	definition (name: "[Beta 0.1.0] Advanced Just About Anything Zwave Plus Switch Driver",namespace: "jvm", author: "jvm") {
+	definition (name: "[Beta 0.1.0] Almost Any Switch Z-wave Plus Switch Driver",namespace: "jvm", author: "jvm") {
 		// capability "Configuration"
 		capability "Initialize"
 		capability "Refresh"
@@ -188,12 +188,17 @@ void refresh()
 
 void refreshEndpoint(Map params = [cd: null, ep: null ])
 {
-	com.hubitat.app.DeviceWrapper targetDevice = (params.cd ?: device)
-	if (txtEnable) log.info "Device ${targetDevice.displayName}: refresing data values"
+	com.hubitat.app.DeviceWrapper targetDevice = device
+	Short ep = null
+	if (params.cd) {
+			ep = params.cd.deviceNetworkId.split("-ep")[-1] as Short
+			targetDevice = params.cd
+	} else if (params.ep) {
+		ep = params.ep
+		targetDevice = getTargetDeviceByEndPoint(params.ep)
+	}
 	
-	Short ep = null 
-	if (params.ep) ep = params.ep as Short
-	if (params.cd) ep = params.cd ? (params.cd.deviceNetworkId.split("-ep")[-1] as Short) : null
+	if (txtEnable) log.info "Device ${targetDevice.displayName}: refresing data values"
 	
 	if (implementsZwaveClass(0x25, ep)) { // Switch Binary Type device
 		sendToDevice(zwave.switchBinaryV1.switchBinaryGet(), ep)
@@ -202,7 +207,7 @@ void refreshEndpoint(Map params = [cd: null, ep: null ])
 		sendToDevice(zwave.switchMultilevelV4.switchMultilevelGet(), ep)
 	} 
  	if (implementsZwaveClass(0x62, ep)) {
-			sendToDevice(zwave.doorLockV1.doorLockOperationGet() )
+		refreshLock()
 	} 
 	if (implementsZwaveClass(0x32, ep)) {
 		meterRefresh( ep )
@@ -1072,18 +1077,21 @@ void setParameter(parameterNumber,value) {
 }
 
 
-void setParameter(Map params = [parameterNumber: null , value: null ] ){
+
+
+
+BigInteger setParameter(Map params = [parameterNumber: null , value: null ] ){
     if (params.parameterNumber.is( null ) || params.value.is( null ) ) {
 		log.warn "Device ${device.displayName}: Can't set parameter ${parameterNumber}, Incomplete parameter list supplied... syntax: setParameter(parameterNumber,size,value), received: setParameter(${parameterNumber}, ${size}, ${value})."
     } else {
 		parameterReports = allParameterReports.get(device.deviceNetworkId, new ConcurrentHashMap<Short, hubitat.zwave.Command>(32))
 
-		Short PSize = parameterReports.get(params.parameterNumber as Short).size
+		Short PSize = parameterReports.get(params.parameterNumber as Short)?.size
+		if (!PSize) {log.error "Could not get parameeter size in function setParameter. defaulting to 1"; PSize = 1}
 
-		List<hubitat.zwave.Command> cmds = []
-	    cmds << secure(supervise(zwave.configurationV1.configurationSet(scaledConfigurationValue: params.value as BigInteger, parameterNumber: params.parameterNumber as Short, size: PSize)))
-	    cmds << secure(zwave.configurationV1.configurationGet(parameterNumber: params.parameterNumber))
-		sendToDevice(cmds)
+		sendSupervised(zwave.configurationV1.configurationSet(scaledConfigurationValue: params.value as BigInteger, parameterNumber: params.parameterNumber as Short, size: PSize))
+		// The 'get' should not be supervised!
+	    sendToDevice( secure(zwave.configurationV1.configurationGet(parameterNumber: params.parameterNumber)))
 		
 		// Wait for the report that is returned after the configurationGet, and then update the input controls so they display the updated value.
 		hubitat.zwave.Command report = myReportQueue("7006").poll(10, TimeUnit.SECONDS)
@@ -1099,6 +1107,8 @@ void setParameter(Map params = [parameterNumber: null , value: null ] ){
 			} else {
 				log.warn "Device ${device.displayName}: Failed to set parameter #: ${params.parameterNumber} to value ${params.value}. Value of parameter is set to ${report.scaledConfigurationValue} instead."
 			}
+			getPendingChangeMap().remove(report.parameterNumber )
+			return report.scaledConfigurationValue	
 		}
     }
 }
@@ -1210,13 +1220,6 @@ void lockInitialize()
 	sendToDevice (secure( zwave.userCodeV1.usersNumberGet() ))
 }
 
-void zwaveEvent(hubitat.zwave.commands.usercodev1.UserCodeReport cmd, Short ep = null ) { 
-	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
-	
-	log.warn "Lock code is still under development. Functions may not be fully implemented."
-	if (logEnable) log.debug "Device ${targetDevice.displayName}: received User Code Report: " + cmd
-}
-
 void zwaveEvent(hubitat.zwave.commands.usercodev1.UsersNumberReport cmd, Short ep = null ) { 
 	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
 	
@@ -1226,73 +1229,16 @@ void zwaveEvent(hubitat.zwave.commands.usercodev1.UsersNumberReport cmd, Short e
 	sendEvent(name:"maxCodes", value: cmd.supportedUsers)
 }
 
-void lockrefresh(Short ep = null )
+void processDoorLockReport(hubitat.zwave.Command  cmd)
 {
-	sendToDevice (secure(zwave.doorLockV1.doorLockOperationGet(), ep))
-}
-void lock(Short ep = null )
-{
-	List<hubitat.zwave.Command> cmds=[]
-	cmds << secure( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0xFF), ep )
-	cmds << "delay 4500"
-	cmds << secure( zwave.doorLockV1.doorLockOperationGet(), ep )
-	sendToDevice(cmds)
-}
+	com.hubitat.app.DeviceWrapper targetDevice = null
 
-void unlock(Short ep = null )
-{
-	List<hubitat.zwave.Command> cmds=[]
-	cmds << secure( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0x00), ep )
-	cmds << "delay 4500"
-	cmds << secure( zwave.doorLockV1.doorLockOperationGet(), ep )
-	sendToDevice(cmds)
-}
-
-void deleteCode(codeposition, Short ep = null )
-{
-    if (logEnable) log.debug "Device ${device.displayName}:  deleting code at position ${codeNumber}."
-	// userIDStatus of 0 corresponds to Z-Wave  "Available (not set)" status.
-	sendToDevice (secure( zwave.userCodeV1.userCodeSet(userIdentifier:codeNumber, userIdStatus:0), ep ))
-	sendToDevice (secure( zwave.userCodeV1.userCodeGet(userIdentifier:codeNumber), ep ))
-}
-
-void getCodes(Short ep = null )
-{
-	log.warn "Device ${device.displayName}: Lock code is still under development. getCodes function is not be fully implemented."
-
-	List<hubitat.zwave.Command> cmds=[]
-		cmds << secure(zwave.userCodeV1.usersNumberGet(), ep)
-		
-		// need to first get the usersNumber and then get the code for each of those users!
-		cmds << secure(zwave.userCodeV1.userCodeGet(userIdentifier: 1), ep)
-	sendToDevice(cmds)
-}
-
-void setCode(codeposition, pincode, name, Short ep = null )
-{
-	log.warn "Device ${device.displayName}: Lock code is still under development. setCode function does not check for code length. You must ensure you use a permitted length!."
-
-	String userCode = pincode as String
-	if (logEnable) log.debug "Device ${device.displayName}: setting code at position ${codeposition} to ${pincode}."
-	assert (userCode instanceof String) 
-
-	List<hubitat.zwave.Command> cmds=[]
-	cmds << secure( zwave.userCodeV1.userCodeSet(userIdentifier:codeNumber, userIdStatus:0), ep )
-	cmds << secure(zwave.userCodeV1.userCodeSet(userIdentifier:codeposition, userIdStatus:1, userCode:userCode ), ep)
-	cmds << secure(zwave.userCodeV1.userCodeGet(userIdentifier:codeposition), ep)
-	sendToDevice(cmds)
-}
-
-void setCodeLength(pincodelength)
-{
-	log.warn "Device ${device.displayName}: Code Length command not supported. If your device supports code length settings, you may be able to set the code length using Z-Wave Parameter Settings controls."
-}
-
-// This is another form of door lock reporting. I believe its obsolete, but I've included it just in case some lock requires it.  
-// Modes 2-4 are not implemented by Hubitat.
-void zwaveEvent(hubitat.zwave.commands.doorlockv1.DoorLockOperationReport cmd, Short ep = null ) 
-{
-	com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
+	getChildDevices()?.each
+	{ child ->	
+		if (child.hasAttribute("lock")) targetDevice = child
+	}
+	
+	if (!targetDevice) return
 	
 	Map lockEvent =
 		[
@@ -1304,10 +1250,88 @@ void zwaveEvent(hubitat.zwave.commands.doorlockv1.DoorLockOperationReport cmd, S
 			33:[name:"lock" , value:"unlocked with timeout", descriptionText:"Door Unsecured for outside Door Handles with timeout"],
 			254:[name:"lock" , value:"unknown", descriptionText:"Lock in unknown state"],
 			255:[name:"lock" , value:"locked", descriptionText:"Door Secured"]
-		].get(cmd.doorLockMode as Integer)
+		].get(cmd?.doorLockMode as Integer)
 
-	if (lockEvent) targetDevice.sendEvent(lockEvent)
+	if (lockEvent) targetDevice.sendEvent(lockEvent)	
 }
+
+
+void componentLock(Map params = [cd: null ] )  { lock() }
+void lock()
+{
+	sendSupervised(zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0xFF))
+	Map	transferredData = myReportQueue("6203").poll(10, TimeUnit.SECONDS)
+	if (transferredData) processDoorLockReport(transferredData.report)
+	runIn(5, refreshLock)
+}
+
+void componentUnlock(Map params = [cd: null ] )  {unlock() }
+void unlock()
+{
+
+	sendSupervised( zwave.doorLockV1.doorLockOperationSet(doorLockMode: 0x00))
+	Map	transferredData = myReportQueue("6203").poll(10, TimeUnit.SECONDS)
+	if (transferredData) processDoorLockReport(transferredData.report)
+	runIn(5, refreshLock)
+}
+
+
+void refreshLock()
+{
+	sendSupervised(zwave.doorLockV1.doorLockOperationGet())
+	Map	transferredData = myReportQueue("6203").poll(10, TimeUnit.SECONDS)
+	if (transferredData) processDoorLockReport(transferredData.report)
+}
+		
+void componentDeleteCode(Map params = [codeposition: null] ) { deleteCode(codeposition:params.codeposition) }
+void deleteCode(Map params = [codeposition: codeposition])
+{
+	
+    if (logEnable) log.debug "Device ${device.displayName}:  deleting code at position ${codeNumber}."
+	// userIDStatus of 0 corresponds to Z-Wave  "Available (not set)" status.
+	sendToDevice (secure( zwave.userCodeV1.userCodeSet(userIdentifier:codeNumber, userIdStatus:0)))
+	sendToDevice (secure( zwave.userCodeV1.userCodeGet(userIdentifier:codeNumber)))
+}
+
+void componentGetCodes(Map params = [cd: null ] )  { getCodes() }
+void getCodes()
+{
+	log.warn "Device ${device.displayName}: Lock code is still under development. getCodes function is not be fully implemented."
+
+	List<hubitat.zwave.Command> cmds=[]
+		cmds << secure(zwave.userCodeV1.usersNumberGet(), ep)
+		
+		// need to first get the usersNumber and then get the code for each of those users!
+		cmds << secure(zwave.userCodeV1.userCodeGet(userIdentifier: 1), ep)
+	sendToDevice(cmds)
+}
+void componentSetCode(Map params = [codeposition: null , pincode: null , name: null ] )  {
+	setCode((params.codeposition as Short), (params.pincode as String), (params.name as String))
+}
+void setCode(Short codeposition, String pincode, String name)
+{
+	log.warn "Device ${device.displayName}: Lock code is still under development. setCode function does not check for code length. You must ensure you use a permitted length!."
+
+	String userCode = pincode as String
+	if (logEnable) log.debug "Device ${device.displayName}: setting code at position ${codeposition} to ${pincode}."
+
+	// sendSupervised( zwave.userCodeV1.userCodeSet(userIdentifier:codeNumber, userIdStatus:0))
+	// sendSupervised(zwave.userCodeV1.userCodeSet(userIdentifier:codeposition, userIdStatus:1, userCode:userCode ))
+	sendSupervised(zwave.userCodeV1.userCodeGet(userIdentifier:codeposition))
+	
+	Map	transferredData = myReportQueue("6303").poll(10, TimeUnit.SECONDS)
+	log.debug "User code report is: ${transferredData?.report}"
+
+}
+
+
+void zwaveEvent(hubitat.zwave.commands.doorlockv1.DoorLockOperationReport cmd, Short ep = null ) { transferReport(cmd, ep) }
+
+void zwaveEvent(hubitat.zwave.commands.usercodev1.UserCodeReport cmd) { 
+		log.debug "In event handler, received door lock user code report: ${cmd}."
+		transferReport(cmd, ep) 
+	}
+
 
 /////////////////////////////////////////////////////////////////////////
 //////        Create and Manage Child Devices for Endpoints       ///////
@@ -1679,7 +1703,7 @@ Boolean transferReport(cmd, ep)
 	
 	if (!transferredReport) { 
 		com.hubitat.app.DeviceWrapper targetDevice = getTargetDeviceByEndPoint(ep)
-		log.warn "Device ${targetDevice.displayName}: Failed to transfer version report for command ${cmd}." 
+		log.warn "Device ${targetDevice.displayName}: Failed to transfer  report for report class ${cmd.CMD}, command ${cmd}." 
 	}
 }
 
