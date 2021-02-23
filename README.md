@@ -15,6 +15,9 @@ The Central Scene handling code now supports up to 5 button taps through the att
 
 The attribute "multiTapButton" can be used in rule machine. Whenever a button is tapped, there will be a "multiTapButton" event (in addition to "traditional" pushed and doubleTap events, which you can still use).  The multiTapButton attribute value is specified in decimal notation, with the whole-number part  (i.e., before the decimal) being the button number, and the decimal part indicating the number of taps. Thus, for example, multiTapButton = 4.3  means that button 4 was tapped 3 times.
 
+## Supervision Support
+This driver now supports Z-Wave's command supervision class. The Supervision command class allows the Hubitat hub to receive confirmation from a device that a command was received and processed. If the hub doesn't receive that confirmation, it will re-send the command. What this means is improved reliability (for devices that implement the Supervision command class).
+
 ## EndPoint Support
 The driver now provides better support for endpoints.
 
