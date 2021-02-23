@@ -5,7 +5,7 @@ Feb. 23, 2021: Update - Code has been reworked with a focuse on better Endpoint 
 
 # Advanced Zwave Plus Dimmer driver  and Switch driver- Beta Releases!
 
-The file "Advanced Zwave Plus Dimmer Driver.groovy" is a dimmer driver file, and Advanced Zwave Plus Switch Driver.groovy" a Switch driver that can identify all the parameters for a device and provides input controls allowing the setting of each parameter.
+The file "Almost Any Z-Wave Plus Dimmer Driver.groovy" is a dimmer driver file, and Almost Any Z-Wave Plus Switch Driver.groovy" a Switch driver that can identify all the parameters for a device and provides input controls allowing the setting of each parameter.
 
 The way this works is that the driver queries the opensmarthouse.com database using the device's manufacturer, device type, and device ID information to retrieve a database record identifying all the parameters for the device. That information is then saved in the device's "state".
 
