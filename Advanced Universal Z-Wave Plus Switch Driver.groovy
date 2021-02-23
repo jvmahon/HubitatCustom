@@ -2,14 +2,13 @@ import java.util.concurrent.* // Available (white-listed) concurrency classes: C
 import groovy.transform.Field
 
 metadata {
-	definition (name: "[Beta 0.1.0] Advanced Zwave Plus Metering Switch",namespace: "jvm", author: "jvm") {
-		capability "Configuration"
+	definition (name: "[Beta 0.1.0] Advanced Just About Anything Zwave Plus Switch Driver",namespace: "jvm", author: "jvm") {
+		// capability "Configuration"
 		capability "Initialize"
 		capability "Refresh"
 		capability "Switch"
 		// capability "SwitchLevel"
 		// capability "ChangeLevel"
-        // capability "Lock"
 		// capability "WindowShade"
 		
 		capability "PowerMeter"
@@ -24,10 +23,12 @@ metadata {
 		command "release", ["NUMBER"]
 		capability "DoubleTapableButton"
 		command "doubleTap", ["NUMBER"]
+        command "multiTap", [[name:"button",type:"NUMBER", description:"Button Number", constraints:["NUMBER"]],
+					[name:"taps",type:"NUMBER", description:"Tap count", constraints:["NUMBER"]]]
 
-        attribute "buttonTripleTapped", "number"	
-		attribute "buttonFourTaps", "number"	
-		attribute "buttonFiveTaps", "number"	         
+        // attribute "buttonTripleTapped", "number"	
+		// attribute "buttonFourTaps", "number"	
+		// attribute "buttonFiveTaps", "number"	         
 		attribute "multiTapButton", "number"	
 		
 		command "setParameter",[[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],
@@ -35,8 +36,9 @@ metadata {
 					]	
 		
 		command "resetState"
-		// command "indicatorSupportedGet", [[name:"indicatorId",type:"NUMBER", description:"indicatorId Number", constraints:["NUMBER"]]]
-		
+        
+        // Following commands are for debugging purposes
+		// command "indicatorSupportedGet", [[name:"indicatorId",type:"NUMBER", description:"indicatorId Number", constraints:["NUMBER"]]]	
 		// command "preCacheReports"
 		// command "getCachedVersionReport"
 		// command "getCachedNotificationSupportedReport"
@@ -834,6 +836,10 @@ String setCentralSceneButtonState(Integer button, String state) {
 void getCentralSceneInfo() {
 	// Not currently used.
 	sendToDevice(zwave.centralSceneV3.centralSceneSupportedGet() )
+}
+
+void multiTap(button, taps) {
+    sendEvent(name:"multiTapButton", value:("${button}.${taps}" as Float), type:"physical", unit:"Button #.Tap Count", isStateChange:true )		
 }
 
 void zwaveEvent(hubitat.zwave.commands.centralscenev3.CentralSceneNotification cmd)
