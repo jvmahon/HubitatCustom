@@ -7,16 +7,16 @@
   "drivers": [
     {
       "id": "4429838c-b709-426d-afc8-0fe8fbafdba7",
-      "name": "[Beta 0.1.0] Advanced Zwave Plus Metering Dimmer",
+      "name": "[Beta 0.1.0] Almost Any Zwave Plus Metering Dimmer",
       "namespace": "jvm",
-      "location": "https://raw.githubusercontent.com/jvmahon/HubitatCustom/main/Advanced%20Universal%20Z-Wave%20Plus%20Dimmer%20Driver.groovy",
+      "location": "https://raw.githubusercontent.com/jvmahon/HubitatCustom/main/Almost%20Any%20Z-Wave%20Plus%20Dimmer%20Driver.groovy",
       "required": false
     },
     {
       "id": "3970ad30-88ee-498e-b532-1c5852a9bd5c",
-      "name": "[Beta 0.1.0] Advanced Zwave Plus Metering Switch",
+      "name": "[Beta 0.1.0] Almost Any Zwave Plus Metering Switch",
       "namespace": "jvm",
-      "location": "https://raw.githubusercontent.com/jvmahon/HubitatCustom/main/Advanced%20Universal%20Z-Wave%20Plus%20Switch%20Driver.groovy",
+      "location": "https://raw.githubusercontent.com/jvmahon/HubitatCustom/main/Almost%20Any%20Z-Wave%20Plus%20Switch%20Driver.groovy",
       "required": false
     }
   ]
