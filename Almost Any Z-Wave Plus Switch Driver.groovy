@@ -2,7 +2,7 @@ import java.util.concurrent.* // Available (white-listed) concurrency classes: C
 import groovy.transform.Field
 
 metadata {
-	definition (name: "[Beta 0.1.0] Almost Any Switch Z-wave Plus Switch Driver",namespace: "jvm", author: "jvm") {
+	definition (name: "[Beta 0.1.1] Almost Any Switch Z-wave Plus Switch Driver",namespace: "jvm", author: "jvm") {
 		// capability "Configuration"
 		capability "Initialize"
 		capability "Refresh"
@@ -167,6 +167,9 @@ synchronized void initialize( )
     
 	// if (txtEnable) log.info "Device ${device.displayName}: Getting parameter values from device."
 	// setInputControlsToDeviceValue()
+	
+	if (txtEnable) log.info "Device ${device.displayName}: Getting central scene button count."
+		getCentralSceneButtonCount()
 	
 	if (txtEnable) log.info "Device ${device.displayName}: Refreshing device data."
 	    refresh()    
@@ -838,10 +841,14 @@ String setCentralSceneButtonState(Integer button, String state) {
 	return centralSceneButtonState.get(key)
 }
 
-void getCentralSceneInfo() {
-	// Not currently used.
-	sendToDevice(zwave.centralSceneV3.centralSceneSupportedGet() )
+void getCentralSceneButtonCount() {
+	
+	hubitat.zwave.Command cmd = getCachedCentralSceneSupportedReport()
+	if (cmd) {
+		sendEvent(name:"numberOfButtons", value: cmd.supportedScenes)
+	}
 }
+
 
 void multiTap(button, taps) {
     sendEvent(name:"multiTapButton", value:("${button}.${taps}" as Float), type:"physical", unit:"Button #.Tap Count", isStateChange:true )		
