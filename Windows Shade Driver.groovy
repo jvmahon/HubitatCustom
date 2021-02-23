@@ -2,7 +2,7 @@ import java.util.concurrent.* // Available (white-listed) concurrency classes: C
 import groovy.transform.Field
 
 metadata {
-	definition (name: "[Beta 0.1.0] Almost Any Dimmer Z-wave Plus Dimmer Driver",namespace: "jvm", author: "jvm") {
+	definition (name: "[Beta 0.1.0] Almost Any Window Shade Driver",namespace: "jvm", author: "jvm") {
 		// capability "Configuration"
 		capability "Initialize"
 		capability "Refresh"
