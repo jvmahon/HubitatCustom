@@ -1,7 +1,7 @@
 # HubitatCustom
 
 ## Current Plans . . .
-Feb. 23, 2021: Update - Code has been reworked with a focuse on better Endpoint handling and improved concurrency handling
+Feb. 23, 2021: Update - Code has been reworked with a focuse on better Endpoint handling and improved concurrency handling.  Next significant updates will be after Hubitat release 2.2.6
 
 # Advanced Zwave Plus Dimmer driver  and Switch driver- Beta Releases!
 
